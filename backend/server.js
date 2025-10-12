@@ -390,7 +390,7 @@ const startServer = async () => {
     console.log('\n' + '═'.repeat(60));
     console.log('  🤖 AI EQUIPMENT HEALTH MONITOR SERVER');
     console.log('═'.repeat(60));
-    console.log(`📡 Server:     http://localhost:${PORT}`);
+    console.log(`📡 Server:     https://equiphealth-7cf34.web.app`);
     console.log(`🗄️  Database:   ${global.dbConnected ? '✅ Connected' : '⚠️  In-Memory Mode'}`);
     console.log(`🔐 Auth:       ✅ Enabled (JWT + OAuth)`);
     console.log(`🐍 ML Engine:  Python (scikit-learn)`);
