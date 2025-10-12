@@ -14,10 +14,29 @@ const PORT = process.env.PORT || 5000;
 // Connect to database
 connectDB();
 
+const corsOptions = {
+  origin: [
+    process.env.FRONTEND_URL || 'http://localhost:5173',
+    'https://equiphealth-7cf34.web.app',              
+    'https://console.firebase.google.com/project/equiphealth-7cf34/overview',      
+    'http://localhost:5173'                      
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
+
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  origin: [process.env.FRONTEND_URL || 'http://localhost:5173',
+    'https://equiphealth-7cf34.web.app',
+    'https://console.firebase.google.com/project/equiphealth-7cf34/overview'
+  ],
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

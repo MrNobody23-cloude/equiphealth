@@ -75,7 +75,7 @@ exports.register = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     // Create verification URL
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`
 
     // Email content
     const html = getVerificationEmailTemplate(user.name, verificationUrl);
