@@ -1,0 +1,581 @@
+# ============================================
+# EQUIPMENT HEALTH MONITOR - MASTER .gitignore
+# Covers: Backend (Node.js + Python ML) + Frontend (React + Vite + Firebase)
+# ============================================
+
+# ============================================
+# CRITICAL - ENVIRONMENT VARIABLES
+# NEVER COMMIT THESE FILES
+# ============================================
+.env
+.env.*
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+!**/.env.example
+
+# Configuration files with secrets
+config.json
+secrets.json
+*.secret
+*.private
+
+# ============================================
+# NODE.JS & NPM
+# ============================================
+node_modules/
+*/node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm
+.eslintcache
+.node_repl_history
+.yarn-integrity
+
+# Lock files (optional - uncomment to ignore)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ============================================
+# PYTHON & MACHINE LEARNING
+# ============================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.cache
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pyenv
+.python-version
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+env.bak/
+venv.bak/
+pythonenv*/
+
+# Spyder & PyCharm
+.spyderproject
+.spyproject
+.ropeproject
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ============================================
+# MACHINE LEARNING MODELS & DATA
+# These are large files that should be generated locally
+# ============================================
+
+# ML Models
+backend/python/models/*.pkl
+backend/python/models/*.h5
+backend/python/models/*.hdf5
+backend/python/models/*.joblib
+backend/python/models/*.pth
+backend/python/models/*.pt
+backend/python/models/*.onnx
+backend/python/models/*.pb
+backend/python/models/*.tflite
+backend/python/models/*.safetensors
+backend/python/models/*.bin
+!backend/python/models/.gitkeep
+
+# Training Data
+backend/python/data/*.csv
+backend/python/data/*.xlsx
+backend/python/data/*.xls
+backend/python/data/*.json
+backend/python/data/*.txt
+backend/python/data/*.parquet
+backend/python/data/*.feather
+!backend/python/data/.gitkeep
+
+# Model Checkpoints
+*.ckpt
+checkpoints/
+saved_models/
+
+# TensorBoard logs
+runs/
+tensorboard_logs/
+tf_logs/
+
+# Weights & Biases
+wandb/
+
+# ============================================
+# BUILD OUTPUTS
+# ============================================
+
+# Frontend builds
+frontend/dist/
+frontend/dist-ssr/
+frontend/build/
+frontend/out/
+frontend/.output/
+frontend/.vite/
+frontend/.next/
+frontend/.nuxt/
+
+# Backend builds
+backend/dist/
+backend/build/
+backend/out/
+
+# ============================================
+# FIREBASE
+# ============================================
+
+# Firebase cache and logs
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+.firebaserc.backup
+ui-debug.log
+firestore-debug.log
+pubsub-debug.log
+database-debug.log
+
+# Firebase Functions
+frontend/functions/node_modules/
+frontend/functions/.env
+frontend/functions/lib/
+backend/functions/node_modules/
+backend/functions/.env
+backend/functions/lib/
+
+# Firebase emulator data
+.firebase-cache/
+.firebase-emulator-data/
+firebase-export-*/
+
+# ============================================
+# VITE (Frontend)
+# ============================================
+frontend/.vite/
+frontend/*.local
+frontend/vite.config.js.timestamp-*
+frontend/vite.config.ts.timestamp-*
+
+# ============================================
+# LOGS
+# ============================================
+logs/
+*.log
+backend/logs/*.log
+frontend/logs/*.log
+!backend/logs/.gitkeep
+!frontend/logs/.gitkeep
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+combined.log
+error.log
+access.log
+exceptions.log
+debug.log
+
+# ============================================
+# DATABASE FILES
+# ============================================
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+data/*.db
+mongodb/
+redis/
+postgres/
+dumps/
+*.dump
+*.sql
+*.bak
+backup/
+backups/
+
+# ============================================
+# UPLOADS & USER GENERATED CONTENT
+# ============================================
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/storage/
+backend/temp/
+backend/tmp/
+frontend/uploads/
+frontend/storage/
+frontend/temp/
+frontend/tmp/
+
+# ============================================
+# TESTING & COVERAGE
+# ============================================
+coverage/
+*.coverage
+.nyc_output/
+.pytest_cache/
+htmlcov/
+.tox/
+.nox/
+junit.xml
+.vitest/
+test-results/
+playwright-report/
+playwright/.cache/
+.jest/
+__snapshots__/
+
+# ============================================
+# IDE & EDITORS
+# ============================================
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json.example
+*.code-workspace
+
+# JetBrains IDEs (IntelliJ, PyCharm, WebStorm, etc.)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+.sublime-lsp/
+
+# Vim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+
+# Eclipse
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+
+# NetBeans
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# Visual Studio
+.vs/
+
+# ============================================
+# OPERATING SYSTEM FILES
+# ============================================
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================
+# CERTIFICATES & KEYS
+# ============================================
+*.pem
+*.key
+*.cert
+*.crt
+*.cer
+*.p12
+*.pfx
+*.p7b
+*.spc
+*.pvk
+ssl/
+certs/
+certificates/
+private/
+
+# SSH Keys
+id_rsa
+id_rsa.pub
+id_dsa
+id_dsa.pub
+id_ecdsa
+id_ecdsa.pub
+id_ed25519
+id_ed25519.pub
+
+# ============================================
+# SESSION & CACHE
+# ============================================
+.cache/
+.parcel-cache/
+.turbo/
+sessions/
+*.session
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+.sass-cache/
+connect.lock
+typings/
+
+# ============================================
+# DEPLOYMENT & CLOUD
+# ============================================
+.vercel
+.netlify
+.serverless/
+.fusebox/
+.dynamodb/
+.tern-port
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Heroku
+.heroku/
+
+# AWS
+.aws/
+.elasticbeanstalk/
+
+# Google Cloud
+.gcloud/
+
+# Azure
+.azure/
+
+# ============================================
+# STORYBOOK
+# ============================================
+storybook-static/
+.storybook-out/
+
+# ============================================
+# PWA (Progressive Web App)
+# ============================================
+sw.js
+sw.js.map
+workbox-*.js
+workbox-*.js.map
+precache-manifest.*.js
+
+# ============================================
+# DOCUMENTATION BUILD
+# ============================================
+docs/_build/
+docs/.doctrees/
+site/
+_site/
+
+# ============================================
+# MISC TEMPORARY FILES
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*.swp
+*.swo
+.#*
+\#*#
+
+# ============================================
+# COMPILED SOURCE
+# ============================================
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.pyc
+
+# ============================================
+# COMPRESSED FILES (Optional)
+# ============================================
+# Uncomment if you don't want to track compressed files
+# *.7z
+# *.dmg
+# *.gz
+# *.iso
+# *.jar
+# *.rar
+# *.tar
+# *.zip
+
+# ============================================
+# SOURCE MAPS (Optional)
+# ============================================
+# Uncomment if you don't want to commit source maps
+# *.map
+# *.js.map
+# *.css.map
+
+# ============================================
+# SENTRY
+# ============================================
+.sentryclirc
+.sentry-native/
+
+# ============================================
+# ANALYTICS
+# ============================================
+.analytics/
+
+# ============================================
+# NEXT.JS (If migrating to Next.js later)
+# ============================================
+.next/
+next-env.d.ts
+
+# ============================================
+# NUXT.JS (If migrating to Nuxt.js later)
+# ============================================
+.nuxt/
+nuxt.d.ts
+
+# ============================================
+# MICROBUNDLE
+# ============================================
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
+# ============================================
+# OPTIONAL: npm CACHE
+# ============================================
+.npm
+
+# ============================================
+# KEEP THESE DIRECTORIES (Empty but tracked)
+# ============================================
+!backend/logs/.gitkeep
+!backend/uploads/.gitkeep
+!backend/python/models/.gitkeep
+!backend/python/data/.gitkeep
+!frontend/public/.gitkeep
+!frontend/src/assets/.gitkeep

@@ -1,0 +1,117 @@
+{
+  "trained_at": "2025-10-12T09:35:06.925550",
+  "model_type": "RandomForestRegressor",
+  "n_features": 17,
+  "feature_names": [
+    "equipment_type_encoded",
+    "operating_hours",
+    "battery_health",
+    "cpu_usage",
+    "ram_usage",
+    "thermal_throttling",
+    "gpu_usage",
+    "fan_speed",
+    "power_consumption",
+    "screen_brightness",
+    "network_activity",
+    "load_percentage",
+    "noise_level",
+    "rotation_speed",
+    "current_draw",
+    "oil_quality",
+    "efficiency_rating"
+  ],
+  "metrics": {
+    "train_rmse": 3.065247720563492,
+    "train_r2": 0.9805781172015763,
+    "train_mae": 2.3401063357950744,
+    "test_rmse": 6.3046385535149,
+    "test_r2": 0.9169642648505807,
+    "test_mae": 5.044109436692217,
+    "cv_r2_mean": 0.9081971925640019,
+    "cv_r2_std": 0.0031884629391931174,
+    "feature_importance": [
+      {
+        "feature": "operating_hours",
+        "importance": 0.24340716762717654
+      },
+      {
+        "feature": "battery_health",
+        "importance": 0.1495598085505842
+      },
+      {
+        "feature": "thermal_throttling",
+        "importance": 0.1308501535268683
+      },
+      {
+        "feature": "load_percentage",
+        "importance": 0.11798758714468792
+      },
+      {
+        "feature": "oil_quality",
+        "importance": 0.10183014736394858
+      },
+      {
+        "feature": "efficiency_rating",
+        "importance": 0.05751872520463906
+      },
+      {
+        "feature": "ram_usage",
+        "importance": 0.05579069500770176
+      },
+      {
+        "feature": "noise_level",
+        "importance": 0.05572203980041721
+      },
+      {
+        "feature": "current_draw",
+        "importance": 0.04579380351073926
+      },
+      {
+        "feature": "cpu_usage",
+        "importance": 0.016942709803925995
+      },
+      {
+        "feature": "fan_speed",
+        "importance": 0.008005003442572553
+      },
+      {
+        "feature": "rotation_speed",
+        "importance": 0.0040555488281691105
+      },
+      {
+        "feature": "screen_brightness",
+        "importance": 0.0025962764896927315
+      },
+      {
+        "feature": "power_consumption",
+        "importance": 0.0025689468934817854
+      },
+      {
+        "feature": "equipment_type_encoded",
+        "importance": 0.002557341205655222
+      },
+      {
+        "feature": "gpu_usage",
+        "importance": 0.002472092541615349
+      },
+      {
+        "feature": "network_activity",
+        "importance": 0.00234195305812438
+      }
+    ]
+  },
+  "label_encoders": {
+    "equipment_type": [
+      "compressor",
+      "desktop",
+      "hvac",
+      "industrial_machine",
+      "laptop",
+      "motor",
+      "phone",
+      "pump",
+      "tablet"
+    ]
+  }
+}
