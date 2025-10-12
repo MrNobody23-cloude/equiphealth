@@ -43,18 +43,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // Session middleware (for OAuth)
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
-  })
-);
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your-fallback-secret-key-change-this',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // true in production (HTTPS)
+    httpOnly: true,
+    maxAge: 1000 * 60 * 60 * 24 // 24 hours
+  }
+}));
 
 // Passport middleware
 app.use(passport.initialize());
