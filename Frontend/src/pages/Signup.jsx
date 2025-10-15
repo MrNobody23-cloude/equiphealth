@@ -2,9 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import './Auth.css';
-import { firebaseConfig } from '../firebase/config';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || firebaseConfig.apiKey;
+const API_URL = import.meta.env.VITE_API_BASE_URL;
 
 function Signup() {
   const [name, setName] = useState('');
@@ -61,7 +60,7 @@ function Signup() {
   };
 
   const handleOAuthSignup = (provider) => {
-    window.location.href = `${API_URL}/api/auth/${provider}`;
+    window.location.href = `${API_URL}/auth/${provider}`;
   };
 
   if (success) {
