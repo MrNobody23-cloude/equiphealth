@@ -1,39 +1,92 @@
-import axios from 'axios';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
-const API_URL = import.meta.env.VITE_FIREBASE_API_KEY || 'http://localhost:5000';
+console.log('🔗 API Base URL:', API_BASE_URL); // Debug log
 
-const api = axios.create({
-  baseURL: `${API_URL}/api`,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json'
+class ApiService {
+  constructor() {
+    this.baseURL = API_BASE_URL;
   }
-});
 
-// Add token to requests
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+  async request(endpoint, options = {}) {
+    const url = `${this.baseURL}${endpoint}`;
+    
+    const config = {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+      },
+      ...options
+    };
+
+    try {
+      console.log(`📡 API Request: ${options.method || 'GET'} ${url}`); // Debug log
+      
+      const response = await fetch(url, config);
+      
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ 
+          message: `HTTP error! status: ${response.status}` 
+        }));
+        throw new Error(error.message || error.error || 'Request failed');
+      }
+      
+      const data = await response.json();
+      console.log('✅ API Response:', data); // Debug log
+      return data;
+    } catch (error) {
+      console.error('❌ API Request Error:', error);
+      throw error;
     }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
   }
-);
 
-// Handle 401 responses
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
-    }
-    return Promise.reject(error);
+  // Auth methods
+  async login(credentials) {
+    return this.request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(credentials)
+    });
   }
-);
 
-export default api;
+  async register(userData) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData)
+    });
+  }
+
+  async logout() {
+    return this.request('/auth/logout', {
+      method: 'GET'
+    });
+  }
+
+  async getCurrentUser() {
+    return this.request('/auth/me', {
+      method: 'GET'
+    });
+  }
+
+  // ML prediction
+  async predictHealth(data) {
+    return this.request('/ml/predict', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  // Service locator
+  async findServices(latitude, longitude, equipmentType, radius = 5000) {
+    const params = new URLSearchParams({
+      lat: latitude,
+      lng: longitude,
+      type: equipmentType,
+      radius: radius
+    });
+    return this.request(`/service-locator?${params}`, {
+      method: 'GET'
+    });
+  }
+}
+
+export default new ApiService();
