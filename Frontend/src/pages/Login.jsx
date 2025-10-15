@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import './Auth.css';
 
-const API_URL = import.meta.env.VITE_FIREBASE_API_KEY || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'http://localhost:5000';
 
 function Login() {
   const [email, setEmail] = useState('');
