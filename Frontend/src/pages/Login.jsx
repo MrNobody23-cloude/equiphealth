@@ -44,7 +44,7 @@ function Login() {
   };
 
   const handleOAuthLogin = (provider) => {
-    window.location.href = `${API_URL}/api/auth/${provider}`;
+    window.location.href = `${API_URL}/auth/${provider}`;
   };
 
   return (

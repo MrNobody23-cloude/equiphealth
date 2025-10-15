@@ -60,7 +60,7 @@ function Signup() {
   };
 
   const handleOAuthSignup = (provider) => {
-    window.location.href = `${API_URL}/api/auth/${provider}`;
+    window.location.href = `${API_URL}/auth/${provider}`;
   };
 
   if (success) {
