@@ -17,8 +17,8 @@ connectDB();
 const corsOptions = {
   origin: [
     process.env.FRONTEND_URL || 'http://localhost:5173',
-    'https://equiphealth-7cf34.web.app',              
-    'https://console.firebase.google.com/project/equiphealth-7cf34/overview',      
+    'https://equiphealth-23.web.app',              
+    'https://console.firebase.google.com/project/equiphealth-23/overview',      
     'http://localhost:5173'                      
   ],
   credentials: true,
@@ -32,8 +32,8 @@ app.use(cors(corsOptions));
 // Middleware
 app.use(cors({
   origin: [process.env.FRONTEND_URL || 'http://localhost:5173',
-    'https://equiphealth-7cf34.web.app',
-    'https://console.firebase.google.com/project/equiphealth-7cf34/overview'
+    'https://equiphealth-23.web.app',
+    'https://console.firebase.google.com/project/equiphealth-23/overview'
   ],
   credentials: true,
   optionsSuccessStatus: 200
