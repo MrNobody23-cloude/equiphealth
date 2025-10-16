@@ -21,19 +21,25 @@ passport.deserializeUser(async (id, done) => {
 
 // Google OAuth Strategy
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-  const googleCallbackURL = process.env.GOOGLE_CALLBACK_URL || 
-    `${process.env.BACKEND_URL}/api/auth/google/callback` ||
-    'http://localhost:5000/api/auth/google/callback';
+  // Build callback URL - MUST use HTTPS in production
+  const callbackURL = process.env.GOOGLE_CALLBACK_URL || 
+                      (process.env.NODE_ENV === 'production' 
+                        ? 'https://equiphealth.onrender.com/api/auth/google/callback'
+                        : 'http://localhost:5000/api/auth/google/callback');
 
-  console.log('🔐 Google OAuth configured');
-  console.log('📍 Callback URL:', googleCallbackURL);
+  console.log('━'.repeat(60));
+  console.log('🔐 Google OAuth Configuration:');
+  console.log('   Client ID:', process.env.GOOGLE_CLIENT_ID?.substring(0, 20) + '...');
+  console.log('   Callback URL:', callbackURL);
+  console.log('   Environment:', process.env.NODE_ENV);
+  console.log('━'.repeat(60));
 
   passport.use(
     new GoogleStrategy(
       {
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: googleCallbackURL,
+        callbackURL: callbackURL,
         proxy: true,
         scope: ['profile', 'email']
       },
@@ -42,7 +48,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
           console.log('✅ Google OAuth callback triggered');
           console.log('📧 Email:', profile.emails[0].value);
 
-          // Check if user exists
           let user = await User.findOne({ email: profile.emails[0].value });
 
           if (user) {
@@ -53,7 +58,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
           console.log('✨ Creating new user');
 
-          // Create new user
           user = await User.create({
             name: profile.displayName,
             email: profile.emails[0].value,
@@ -75,24 +79,28 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     )
   );
 } else {
-  console.log('⚠️  Google OAuth not configured');
+  console.log('⚠️  Google OAuth not configured - missing credentials');
 }
 
 // GitHub OAuth Strategy
 if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
-  const githubCallbackURL = process.env.GITHUB_CALLBACK_URL || 
-    `${process.env.BACKEND_URL}/api/auth/github/callback` ||
-    'http://localhost:5000/api/auth/github/callback';
+  const callbackURL = process.env.GITHUB_CALLBACK_URL || 
+                      (process.env.NODE_ENV === 'production' 
+                        ? 'https://equiphealth.onrender.com/api/auth/github/callback'
+                        : 'http://localhost:5000/api/auth/github/callback');
 
-  console.log('🔐 GitHub OAuth configured');
-  console.log('📍 Callback URL:', githubCallbackURL);
+  console.log('━'.repeat(60));
+  console.log('🔐 GitHub OAuth Configuration:');
+  console.log('   Client ID:', process.env.GITHUB_CLIENT_ID?.substring(0, 20) + '...');
+  console.log('   Callback URL:', callbackURL);
+  console.log('━'.repeat(60));
 
   passport.use(
     new GitHubStrategy(
       {
         clientID: process.env.GITHUB_CLIENT_ID,
         clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL: githubCallbackURL,
+        callbackURL: callbackURL,
         scope: ['user:email'],
         proxy: true
       },
@@ -140,7 +148,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
     )
   );
 } else {
-  console.log('⚠️  GitHub OAuth not configured');
+  console.log('⚠️  GitHub OAuth not configured - missing credentials');
 }
 
 module.exports = passport;
