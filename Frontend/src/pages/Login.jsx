@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import './Auth.css';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL;
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 function Login() {
   const [email, setEmail] = useState('');
@@ -20,7 +20,6 @@ function Login() {
       navigate('/');
     }
 
-    // Check for OAuth errors
     const oauthError = searchParams.get('error');
     if (oauthError) {
       setError('OAuth authentication failed. Please try again.');
@@ -32,19 +31,24 @@ function Login() {
     setError('');
     setLoading(true);
 
-    const result = await login(email, password);
-    
-    if (result.success) {
-      navigate('/');
-    } else {
-      setError(result.error);
+    try {
+      const result = await login(email, password);
+      
+      if (result.success) {
+        navigate('/');
+      } else {
+        setError(result.error || 'Login failed. Please try again.');
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleOAuthLogin = (provider) => {
-    window.location.href = `${API_URL}/auth/${provider}`;
+    const baseUrl = API_URL.replace('/api', '');
+    window.location.href = `${baseUrl}/api/auth/${provider}`;
   };
 
   return (
@@ -139,7 +143,7 @@ function Login() {
         </div>
 
         <p className="auth-footer">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <Link to="/signup" className="auth-link">
             Sign up
           </Link>

@@ -24,7 +24,11 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     minlength: [6, 'Password must be at least 6 characters'],
-    select: false
+    select: false,
+    required: function() {
+      // Password is required only for local auth
+      return this.provider === 'local';
+    }
   },
   role: {
     type: String,
@@ -63,16 +67,23 @@ const userSchema = new mongoose.Schema({
 
 // Encrypt password before saving
 userSchema.pre('save', async function(next) {
+  // Skip if password is not modified
   if (!this.isModified('password')) {
-    next();
+    return next();
   }
   
-  if (this.password) {
+  // Skip if no password (OAuth users)
+  if (!this.password) {
+    return next();
+  }
+  
+  try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
   }
-  
-  next();
 });
 
 // Sign JWT and return
@@ -84,16 +95,22 @@ userSchema.methods.getSignedJwtToken = function() {
       role: this.role
     },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRE }
+    { expiresIn: process.env.JWT_EXPIRE || '7d' }
   );
 };
 
 // Match user entered password to hashed password in database
 userSchema.methods.matchPassword = async function(enteredPassword) {
+  // Return false if no password (OAuth users)
   if (!this.password) {
     return false;
   }
-  return await bcrypt.compare(enteredPassword, this.password);
+  
+  try {
+    return await bcrypt.compare(enteredPassword, this.password);
+  } catch (error) {
+    return false;
+  }
 };
 
 // Generate email verification token
@@ -135,5 +152,19 @@ userSchema.methods.updateLastLogin = function() {
   this.lastLogin = Date.now();
   return this.save();
 };
+
+// Check if user is OAuth user
+userSchema.methods.isOAuthUser = function() {
+  return this.provider !== 'local';
+};
+
+// Virtual for full name (if you want to split first/last name later)
+userSchema.virtual('displayName').get(function() {
+  return this.name;
+});
+
+// Ensure virtuals are included in JSON
+userSchema.set('toJSON', { virtuals: true });
+userSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('User', userSchema);

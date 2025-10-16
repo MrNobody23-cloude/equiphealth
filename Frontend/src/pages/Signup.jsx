@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import './Auth.css';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL;
+const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 function Signup() {
   const [name, setName] = useState('');
@@ -41,26 +41,30 @@ function Signup() {
 
     setLoading(true);
 
-    const result = await register(name, email, password);
-    
-    if (result.success) {
-      setSuccess(true);
-      setSuccessMessage(result.message || 'Registration successful! Please check your email to verify your account.');
+    try {
+      const result = await register(name, email, password);
       
-      // Clear form
-      setName('');
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-    } else {
-      setError(result.error);
+      if (result.success) {
+        setSuccess(true);
+        setSuccessMessage(result.message || 'Registration successful! Please check your email to verify your account.');
+        
+        setName('');
+        setEmail('');
+        setPassword('');
+        setConfirmPassword('');
+      } else {
+        setError(result.error || 'Registration failed. Please try again.');
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleOAuthSignup = (provider) => {
-    window.location.href = `${API_URL}/auth/${provider}`;
+    const baseUrl = API_URL.replace('/api', '');
+    window.location.href = `${baseUrl}/api/auth/${provider}`;
   };
 
   if (success) {
@@ -86,7 +90,7 @@ function Signup() {
               </div>
             </div>
             <div className="success-footer">
-              <p>Didn't receive the email?</p>
+              <p>Didn&apos;t receive the email?</p>
               <button 
                 onClick={() => setSuccess(false)}
                 className="resend-button"
@@ -159,6 +163,7 @@ function Signup() {
               required
               className="form-input"
               autoComplete="new-password"
+              minLength="6"
             />
           </div>
 
@@ -173,6 +178,7 @@ function Signup() {
               required
               className="form-input"
               autoComplete="new-password"
+              minLength="6"
             />
           </div>
 

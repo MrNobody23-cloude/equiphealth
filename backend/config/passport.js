@@ -13,8 +13,8 @@ passport.deserializeUser(async (id, done) => {
   try {
     const user = await User.findById(id);
     done(null, user);
-  } catch (error) {
-    done(error, null);
+  } catch (err) {
+    done(err, null);
   }
 });
 
@@ -25,44 +25,45 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       {
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL
+        callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
+        proxy: true
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
+          console.log('Google OAuth callback triggered');
+          console.log('Profile:', profile.emails[0].value);
+
           // Check if user exists
-          let user = await User.findOne({ 
-            $or: [
-              { providerId: profile.id, provider: 'google' },
-              { email: profile.emails[0].value }
-            ]
-          });
+          let user = await User.findOne({ email: profile.emails[0].value });
 
           if (user) {
-            // Update user info
-            if (!user.providerId) {
-              user.providerId = profile.id;
-              user.provider = 'google';
-            }
-            user.avatar = profile.photos[0]?.value;
-            user.emailVerified = profile.emails[0]?.verified || false;
-            await user.save();
-          } else {
-            // Create new user
-            user = await User.create({
-              name: profile.displayName,
-              email: profile.emails[0].value,
-              provider: 'google',
-              providerId: profile.id,
-              avatar: profile.photos[0]?.value,
-              emailVerified: profile.emails[0]?.verified || false
-            });
+            console.log('Existing user found:', user.email);
+            
+            // Update last login
+            await user.updateLastLogin();
+            
+            return done(null, user);
           }
 
-          await user.updateLastLogin();
+          console.log('Creating new user from Google OAuth');
+
+          // Create new user
+          user = await User.create({
+            name: profile.displayName,
+            email: profile.emails[0].value,
+            password: crypto.randomBytes(16).toString('hex') + 'Aa1!', // Random secure password
+            emailVerified: true, // OAuth users are auto-verified
+            provider: 'google',
+            providerId: profile.id,
+            avatar: profile.photos && profile.photos[0] ? profile.photos[0].value : null,
+            lastLogin: Date.now()
+          });
+
+          console.log('New user created:', user.email);
           done(null, user);
-        } catch (error) {
-          console.error('Google OAuth Error:', error);
-          done(error, null);
+        } catch (err) {
+          console.error('Google OAuth error:', err);
+          done(err, null);
         }
       }
     )
@@ -76,46 +77,55 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
       {
         clientID: process.env.GITHUB_CLIENT_ID,
         clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL: process.env.GITHUB_CALLBACK_URL,
-        scope: ['user:email']
+        callbackURL: process.env.GITHUB_CALLBACK_URL || '/api/auth/github/callback',
+        scope: ['user:email'],
+        proxy: true
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
-          const email = profile.emails && profile.emails[0] ? profile.emails[0].value : `${profile.username}@github.com`;
+          console.log('GitHub OAuth callback triggered');
 
-          // Check if user exists
-          let user = await User.findOne({ 
-            $or: [
-              { providerId: profile.id, provider: 'github' },
-              { email: email }
-            ]
-          });
+          // Get email from profile
+          const email = profile.emails && profile.emails[0] ? profile.emails[0].value : null;
 
-          if (user) {
-            // Update user info
-            if (!user.providerId) {
-              user.providerId = profile.id;
-              user.provider = 'github';
-            }
-            user.avatar = profile.photos[0]?.value;
-            await user.save();
-          } else {
-            // Create new user
-            user = await User.create({
-              name: profile.displayName || profile.username,
-              email: email,
-              provider: 'github',
-              providerId: profile.id,
-              avatar: profile.photos[0]?.value,
-              emailVerified: false
-            });
+          if (!email) {
+            console.error('No email found in GitHub profile');
+            return done(new Error('No email found in GitHub profile'), null);
           }
 
-          await user.updateLastLogin();
+          console.log('GitHub email:', email);
+
+          // Check if user exists
+          let user = await User.findOne({ email });
+
+          if (user) {
+            console.log('Existing user found:', user.email);
+            
+            // Update last login
+            await user.updateLastLogin();
+            
+            return done(null, user);
+          }
+
+          console.log('Creating new user from GitHub OAuth');
+
+          // Create new user
+          user = await User.create({
+            name: profile.displayName || profile.username || 'GitHub User',
+            email: email,
+            password: crypto.randomBytes(16).toString('hex') + 'Aa1!', // Random secure password
+            emailVerified: true, // OAuth users are auto-verified
+            provider: 'github',
+            providerId: profile.id,
+            avatar: profile.photos && profile.photos[0] ? profile.photos[0].value : null,
+            lastLogin: Date.now()
+          });
+
+          console.log('New user created:', user.email);
           done(null, user);
-        } catch (error) {
-          console.error('GitHub OAuth Error:', error);
-          done(error, null);
+        } catch (err) {
+          console.error('GitHub OAuth error:', err);
+          done(err, null);
         }
       }
     )
