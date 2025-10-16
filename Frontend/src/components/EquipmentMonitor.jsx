@@ -71,7 +71,7 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
         setPrefillData(null);
       }
 
-      console.log(`📝 Adding new readings for: ${prefillData.equipmentName}`);
+      alert(`📝 Adding new readings for: ${prefillData.equipmentName}`);
     }
   }, [prefillData, setPrefillData]);
 
@@ -379,11 +379,12 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
   setPrediction(null);
 
   const payload = {
-    equipmentName,
-    equipment_type: equipmentType,
-    model: equipmentName,
-    operating_hours: parseFloat(sensorData.operating_hours) || undefined,
-    // ... rest of the payload
+    equipmentName: equipmentName.trim(),
+    equipmentType: equipmentType,
+    temperature: parseFloat(temperature),
+    vibration: parseFloat(vibration),
+    pressure: parseFloat(pressure),
+    runtime: parseFloat(runtime),
   };
 
   try {

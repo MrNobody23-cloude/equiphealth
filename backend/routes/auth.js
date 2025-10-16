@@ -1,75 +1,81 @@
 const express = require('express');
 const router = express.Router();
 const passport = require('passport');
-const { body } = require('express-validator');
-const {
-  register,
-  login,
-  getMe,
-  logout,
-  oauthSuccess,
-  verifyEmail,
-  resendVerification
-} = require('../controllers/auth');
+const authController = require('../controllers/auth');
 const { protect } = require('../middleware/auth');
 
-// Local authentication routes
-router.post(
-  '/register',
-  [
-    body('name').trim().notEmpty().withMessage('Name is required'),
-    body('email').isEmail().withMessage('Please provide a valid email'),
-    body('password')
-      .isLength({ min: 6 })
-      .withMessage('Password must be at least 6 characters')
-  ],
-  register
-);
+// Health check
+router.get('/health', (req, res) => {
+  res.status(200).json({ 
+    success: true, 
+    message: 'Auth routes are working',
+    timestamp: new Date().toISOString()
+  });
+});
 
-router.post(
-  '/login',
-  [
-    body('email').isEmail().withMessage('Please provide a valid email'),
-    body('password').notEmpty().withMessage('Password is required')
-  ],
-  login
-);
+// Local auth routes
+router.post('/register', authController.register);
+router.post('/login', authController.login);
+router.get('/logout', authController.logout);
+router.get('/me', protect, authController.getMe);
 
-// Email verification routes
-router.get('/verify-email/:token', verifyEmail);
-router.post('/resend-verification', resendVerification);
+// Email verification
+router.get('/verify-email/:token', authController.verifyEmail);
 
-router.get('/me', protect, getMe);
-router.get('/logout', protect, logout);
+// Password reset
+router.post('/forgot-password', authController.forgotPassword);
+router.put('/reset-password/:token', authController.resetPassword);
 
 // Google OAuth routes
-router.get(
-  '/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
-);
+router.get('/google', (req, res, next) => {
+  console.log('🔵 Initiating Google OAuth flow');
+  passport.authenticate('google', { 
+    scope: ['profile', 'email'],
+    session: true
+  })(req, res, next);
+});
 
-router.get(
-  '/google/callback',
-  passport.authenticate('google', {
-    failureRedirect: `${process.env.FRONTEND_URL}/login?error=google_auth_failed`,
-    session: false
+router.get('/google/callback', 
+  passport.authenticate('google', { 
+    failureRedirect: process.env.FRONTEND_URL + '/login?error=oauth_failed',
+    session: true
   }),
-  oauthSuccess
+  (req, res) => {
+    console.log('✅ Google OAuth success');
+    console.log('👤 User:', req.user.email);
+    
+    const token = req.user.getSignedJwtToken();
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${token}`;
+    console.log('🔄 Redirecting to:', redirectUrl);
+    
+    res.redirect(redirectUrl);
+  }
 );
 
 // GitHub OAuth routes
-router.get(
-  '/github',
-  passport.authenticate('github', { scope: ['user:email'] })
-);
+router.get('/github', (req, res, next) => {
+  console.log('🔵 Initiating GitHub OAuth flow');
+  passport.authenticate('github', { 
+    scope: ['user:email'],
+    session: true
+  })(req, res, next);
+});
 
-router.get(
-  '/github/callback',
-  passport.authenticate('github', {
-    failureRedirect: `${process.env.FRONTEND_URL}/login?error=github_auth_failed`,
-    session: false
+router.get('/github/callback',
+  passport.authenticate('github', { 
+    failureRedirect: process.env.FRONTEND_URL + '/login?error=oauth_failed',
+    session: true
   }),
-  oauthSuccess
+  (req, res) => {
+    console.log('✅ GitHub OAuth success');
+    console.log('👤 User:', req.user.email);
+    
+    const token = req.user.getSignedJwtToken();
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/callback?token=${token}`;
+    console.log('🔄 Redirecting to:', redirectUrl);
+    
+    res.redirect(redirectUrl);
+  }
 );
 
 module.exports = router;

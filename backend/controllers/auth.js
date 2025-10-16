@@ -1,237 +1,88 @@
-const crypto = require('crypto');
 const User = require('../models/User');
-const { validationResult } = require('express-validator');
+const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
-const { 
-  getVerificationEmailTemplate, 
-  getWelcomeEmailTemplate 
-} = require('../utils/emailTemplates');
-
-// Send token response
-const sendTokenResponse = (user, statusCode, res) => {
-  const token = user.getSignedJwtToken();
-
-  const options = {
-    expires: new Date(
-      Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000
-    ),
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
-  };
-
-  res
-    .status(statusCode)
-    .cookie('token', token, options)
-    .json({
-      success: true,
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        provider: user.provider,
-        avatar: user.avatar,
-        emailVerified: user.emailVerified
-      }
-    });
-};
 
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public
 exports.register = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const { name, email, password } = req.body;
+
+    // Validation
+    if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        errors: errors.array()
+        error: 'Please provide name, email and password'
       });
     }
 
-    const { name, email, password } = req.body;
-
     // Check if user exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'User already exists with this email'
+        error: 'Email already registered'
       });
     }
 
     // Create user
     const user = await User.create({
-      name,
-      email,
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
       password,
       provider: 'local'
     });
 
     // Generate email verification token
     const verificationToken = user.getEmailVerificationToken();
-    await user.save({ validateBeforeSave: false });
-
-    // Create verification URL
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`
-
-    // Email content
-    const html = getVerificationEmailTemplate(user.name, verificationUrl);
-
-    try {
-      await sendEmail({
-        email: user.email,
-        subject: 'Verify Your Email - Equipment Health Monitor',
-        html,
-        text: `Please verify your email by clicking this link: ${verificationUrl}`
-      });
-
-      res.status(201).json({
-        success: true,
-        message: 'Registration successful! Please check your email to verify your account.',
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          emailVerified: false
-        }
-      });
-    } catch (emailError) {
-      console.error('Email send error:', emailError);
-      
-      // If email fails, still create account but notify user
-      user.emailVerificationToken = undefined;
-      user.emailVerificationExpire = undefined;
-      await user.save({ validateBeforeSave: false });
-
-      res.status(201).json({
-        success: true,
-        message: 'Account created but verification email could not be sent. Please contact support.',
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          emailVerified: false
-        }
-      });
-    }
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error registering user',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Verify email
-// @route   GET /api/auth/verify-email/:token
-// @access  Public
-exports.verifyEmail = async (req, res) => {
-  try {
-    // Get hashed token
-    const emailVerificationToken = crypto
-      .createHash('sha256')
-      .update(req.params.token)
-      .digest('hex');
-
-    const user = await User.findOne({
-      emailVerificationToken,
-      emailVerificationExpire: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired verification token'
-      });
-    }
-
-    // Update user
-    user.emailVerified = true;
-    user.emailVerificationToken = undefined;
-    user.emailVerificationExpire = undefined;
     await user.save();
 
-    // Send welcome email
-    const welcomeHtml = getWelcomeEmailTemplate(user.name);
+    // Send verification email
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
     
     try {
       await sendEmail({
         email: user.email,
-        subject: 'Welcome to Equipment Health Monitor! 🎉',
-        html: welcomeHtml
+        subject: 'Email Verification - Equipment Health Monitor',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #667eea;">Welcome to Equipment Health Monitor!</h2>
+            <p>Hi ${user.name},</p>
+            <p>Thank you for registering. Please verify your email address by clicking the button below:</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${verificationUrl}" 
+                 style="background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                Verify Email
+              </a>
+            </div>
+            <p>Or copy and paste this link into your browser:</p>
+            <p style="color: #667eea; word-break: break-all;">${verificationUrl}</p>
+            <p>This link will expire in 24 hours.</p>
+            <p>If you didn't create an account, please ignore this email.</p>
+            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+            <p style="color: #999; font-size: 12px;">Equipment Health Monitor - AI-Powered Predictive Maintenance</p>
+          </div>
+        `
+      });
+
+      res.status(201).json({
+        success: true,
+        message: 'Registration successful! Please check your email to verify your account.'
       });
     } catch (emailError) {
-      console.error('Welcome email error:', emailError);
-    }
-
-    // Send token response
-    await user.updateLastLogin();
-    sendTokenResponse(user, 200, res);
-  } catch (error) {
-    console.error('Verify email error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error verifying email',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Resend verification email
-// @route   POST /api/auth/resend-verification
-// @access  Public
-exports.resendVerification = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'No user found with that email'
+      console.error('Email sending failed:', emailError);
+      // Still return success but with different message
+      res.status(201).json({
+        success: true,
+        message: 'Registration successful! However, we couldn\'t send the verification email. Please contact support.'
       });
     }
-
-    if (user.emailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email is already verified'
-      });
-    }
-
-    // Generate new verification token
-    const verificationToken = user.getEmailVerificationToken();
-    await user.save({ validateBeforeSave: false });
-
-    // Create verification URL
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
-
-    // Email content
-    const html = getVerificationEmailTemplate(user.name, verificationUrl);
-
-    await sendEmail({
-      email: user.email,
-      subject: 'Verify Your Email - Equipment Health Monitor',
-      html,
-      text: `Please verify your email by clicking this link: ${verificationUrl}`
-    });
-
-    res.status(200).json({
-      success: true,
-      message: 'Verification email sent successfully'
-    });
   } catch (error) {
-    console.error('Resend verification error:', error);
+    console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error sending verification email',
-      error: error.message
+      error: error.message || 'Error registering user'
     });
   }
 };
@@ -241,65 +92,70 @@ exports.resendVerification = async (req, res) => {
 // @access  Public
 exports.login = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-
     const { email, password } = req.body;
 
+    // Validation
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide an email and password'
+        error: 'Please provide email and password'
       });
     }
 
-    const user = await User.findOne({ email }).select('+password');
+    // Check for user (include password for comparison)
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        error: 'Invalid credentials'
       });
     }
 
-    if (user.provider !== 'local') {
-      return res.status(401).json({
-        success: false,
-        message: `This account is registered with ${user.provider}. Please use ${user.provider} login.`
-      });
-    }
-
+    // Check if password matches
     const isMatch = await user.matchPassword(password);
 
     if (!isMatch) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        error: 'Invalid credentials'
       });
     }
 
-    // Check if email is verified
-    if (!user.emailVerified) {
-      return res.status(401).json({
-        success: false,
-        message: 'Please verify your email before logging in',
-        emailVerified: false
-      });
-    }
+    // Check if email is verified (optional - you can skip this)
+    // if (!user.emailVerified) {
+    //   return res.status(401).json({
+    //     success: false,
+    //     error: 'Please verify your email before logging in'
+    //   });
+    // }
 
+    // Update last login
     await user.updateLastLogin();
-    sendTokenResponse(user, 200, res);
+
+    // Create token
+    const token = user.getSignedJwtToken();
+
+    // Remove password from response
+    user.password = undefined;
+
+    res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar,
+        emailVerified: user.emailVerified
+      }
+    });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error logging in',
-      error: error.message
+      error: 'Error logging in'
     });
   }
 };
@@ -318,55 +174,183 @@ exports.getMe = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        provider: user.provider,
         avatar: user.avatar,
         emailVerified: user.emailVerified,
-        lastLogin: user.lastLogin,
-        createdAt: user.createdAt
+        provider: user.provider
       }
     });
   } catch (error) {
     console.error('Get me error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching user',
-      error: error.message
+      error: 'Error fetching user data'
     });
   }
 };
 
-// @desc    Logout user / clear cookie
+// @desc    Logout user
 // @route   GET /api/auth/logout
 // @access  Private
-exports.logout = async (req, res) => {
-  res.cookie('token', 'none', {
-    expires: new Date(Date.now() + 10 * 1000),
-    httpOnly: true
-  });
-
-  res.status(200).json({
-    success: true,
-    message: 'User logged out successfully'
+exports.logout = (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      return res.status(500).json({
+        success: false,
+        error: 'Error logging out'
+      });
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: 'Logged out successfully'
+    });
   });
 };
 
-// @desc    OAuth success
-// @route   GET /api/auth/oauth/success
-// @access  Private
-exports.oauthSuccess = async (req, res) => {
-  if (req.user) {
-    // OAuth users are auto-verified
-    if (!req.user.emailVerified) {
-      req.user.emailVerified = true;
-      await req.user.save();
+// @desc    Verify email
+// @route   GET /api/auth/verify-email/:token
+// @access  Public
+exports.verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    // Hash token
+    const emailVerificationToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      emailVerificationToken,
+      emailVerificationExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification token'
+      });
     }
-    
-    await req.user.updateLastLogin();
-    sendTokenResponse(req.user, 200, res);
-  } else {
-    res.status(401).json({
+
+    // Mark email as verified
+    user.emailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpire = undefined;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Email verified successfully! You can now log in.'
+    });
+  } catch (error) {
+    console.error('Email verification error:', error);
+    res.status(500).json({
       success: false,
-      message: 'OAuth authentication failed'
+      error: 'Error verifying email'
+    });
+  }
+};
+
+// @desc    Forgot password
+// @route   POST /api/auth/forgot-password
+// @access  Public
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'No user found with that email'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = user.getResetPasswordToken();
+    await user.save();
+
+    // Send email
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'Password Reset Request',
+        html: `
+          <h2>Password Reset Request</h2>
+          <p>You requested a password reset. Click the link below to reset your password:</p>
+          <a href="${resetUrl}">Reset Password</a>
+          <p>This link will expire in 10 minutes.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+        `
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Password reset email sent'
+      });
+    } catch (emailError) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save();
+
+      return res.status(500).json({
+        success: false,
+        error: 'Email could not be sent'
+      });
+    }
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error processing request'
+    });
+  }
+};
+
+// @desc    Reset password
+// @route   PUT /api/auth/reset-password/:token
+// @access  Public
+exports.resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    // Hash token
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired reset token'
+      });
+    }
+
+    // Set new password
+    user.password = password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successful'
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error resetting password'
     });
   }
 };

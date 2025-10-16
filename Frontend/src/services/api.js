@@ -1,6 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-
-console.log('🔗 API Base URL:', API_BASE_URL); // Debug log
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 class ApiService {
   constructor() {
@@ -10,81 +8,57 @@ class ApiService {
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
     
+    const token = localStorage.getItem('token');
+    
     const config = {
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
+        ...(token && { Authorization: `Bearer ${token}` }),
         ...options.headers
       },
       ...options
     };
 
     try {
-      console.log(`📡 API Request: ${options.method || 'GET'} ${url}`); // Debug log
-      
       const response = await fetch(url, config);
-      
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ 
-          message: `HTTP error! status: ${response.status}` 
-        }));
-        throw new Error(error.message || error.error || 'Request failed');
-      }
-      
       const data = await response.json();
-      console.log('✅ API Response:', data); // Debug log
-      return data;
+
+      if (!response.ok) {
+        throw new Error(data.error || data.message || `HTTP error! status: ${response.status}`);
+      }
+
+      return { data };
     } catch (error) {
-      console.error('❌ API Request Error:', error);
+      console.error('API Request Error:', error);
       throw error;
     }
   }
 
-  // Auth methods
-  async login(credentials) {
-    return this.request('/auth/login', {
+  // Auth endpoints
+  async post(endpoint, body) {
+    return this.request(endpoint, {
       method: 'POST',
-      body: JSON.stringify(credentials)
+      body: JSON.stringify(body)
     });
   }
 
-  async register(userData) {
-    return this.request('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify(userData)
-    });
-  }
-
-  async logout() {
-    return this.request('/auth/logout', {
+  async get(endpoint) {
+    return this.request(endpoint, {
       method: 'GET'
     });
   }
 
-  async getCurrentUser() {
-    return this.request('/auth/me', {
-      method: 'GET'
+  async put(endpoint, body) {
+    return this.request(endpoint, {
+      method: 'PUT',
+      body: JSON.stringify(body)
     });
   }
 
-  // ML prediction
-  async predictHealth(data) {
-    return this.request('/ml/predict', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  }
-
-  // Service locator
-  async findServices(latitude, longitude, equipmentType, radius = 5000) {
-    const params = new URLSearchParams({
-      lat: latitude,
-      lng: longitude,
-      type: equipmentType,
-      radius: radius
-    });
-    return this.request(`/service-locator?${params}`, {
-      method: 'GET'
+  async delete(endpoint) {
+    return this.request(endpoint, {
+      method: 'DELETE'
     });
   }
 }

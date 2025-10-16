@@ -1,4 +1,5 @@
-import { createContext, useState, useEffect, useContext } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const AuthContext = createContext();
@@ -14,7 +15,6 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   useEffect(() => {
     checkAuth();
@@ -30,51 +30,74 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const response = await api.get('/auth/me');
-      if (response.data.success) {
+      
+      if (response.data.success && response.data.user) {
         setUser(response.data.user);
+      } else {
+        localStorage.removeItem('token');
+        setUser(null);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
       localStorage.removeItem('token');
+      setUser(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const login = async (email, password) => {
+  const register = async (name, email, password) => {
     try {
-      setError(null);
-      const response = await api.post('/auth/login', { email, password });
-      
+      const response = await api.post('/auth/register', {
+        name,
+        email,
+        password
+      });
+
       if (response.data.success) {
-        localStorage.setItem('token', response.data.token);
-        setUser(response.data.user);
-        return { success: true };
+        return {
+          success: true,
+          message: response.data.message || 'Registration successful! Please check your email.'
+        };
+      } else {
+        return {
+          success: false,
+          error: response.data.error || 'Registration failed'
+        };
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.message || 'Login failed';
-      setError(errorMessage);
-      return { success: false, error: errorMessage };
+      console.error('Registration error:', error);
+      return {
+        success: false,
+        error: error.message || 'Registration failed. Please try again.'
+      };
     }
   };
 
-  const register = async (name, email, password) => {
-  try {
-    setError(null);
-    const response = await api.post('/auth/register', { name, email, password });
-    
-    if (response.data.success) {
-      // Don't auto-login, let user verify email first
-      return { 
-        success: true,
-        message: response.data.message 
+  const login = async (email, password) => {
+    try {
+      const response = await api.post('/auth/login', {
+        email,
+        password
+      });
+
+      if (response.data.success && response.data.token) {
+        localStorage.setItem('token', response.data.token);
+        setUser(response.data.user);
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: response.data.error || 'Invalid credentials'
+        };
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      return {
+        success: false,
+        error: error.message || 'Login failed. Please try again.'
       };
     }
-  } catch (error) {
-    const errorMessage = error.response?.data?.message || 'Registration failed';
-    setError(errorMessage);
-    return { success: false, error: errorMessage };
-  }
   };
 
   const logout = async () => {
@@ -85,18 +108,39 @@ export const AuthProvider = ({ children }) => {
     } finally {
       localStorage.removeItem('token');
       setUser(null);
+      window.location.href = '/login';
     }
   };
 
   const value = {
     user,
+    setUser,
     loading,
-    error,
-    login,
     register,
+    login,
     logout,
     checkAuth
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        flexDirection: 'column',
+        gap: '20px'
+      }}>
+        <div className="loading-spinner-large"></div>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
