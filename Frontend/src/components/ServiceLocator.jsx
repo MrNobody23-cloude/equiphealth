@@ -1,422 +1,521 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import api from '../services/api';
 import './ServiceLocator.css';
 
-import api from '../services/api';
-const MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-function ServiceLocator() {
-  const [equipmentType, setEquipmentType] = useState('all');
-  const [searchLocation, setSearchLocation] = useState('');
-  const [serviceProviders, setServiceProviders] = useState([]);
-  const [userLocation, setUserLocation] = useState(null);
-  const [loadingLocation, setLoadingLocation] = useState(false);
+const ServiceLocator = ({ equipmentList }) => {
+  const [searchMethod, setSearchMethod] = useState('current'); // current, pincode, city, landmark, coordinates
+  const [location, setLocation] = useState(null);
+  const [searchInputs, setSearchInputs] = useState({
+    pincode: '',
+    city: '',
+    landmark: '',
+    address: '',
+    latitude: '',
+    longitude: ''
+  });
+  const [equipmentType, setEquipmentType] = useState('motor');
+  const [radius, setRadius] = useState(5000);
+  const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  
-  const mapRef = useRef(null);
-  const googleMapRef = useRef(null);
-  const markersRef = useRef([]);
+  const [error, setError] = useState('');
+  const [locationError, setLocationError] = useState('');
+  const [searchedLocation, setSearchedLocation] = useState(null);
 
+  // Get current location on mount
   useEffect(() => {
-    if (window.google && window.google.maps) {
-      initMap();
+    if (searchMethod === 'current') {
+      getCurrentLocation();
+    }
+  }, [searchMethod]);
+
+  const getCurrentLocation = () => {
+    setLocationError('');
+    
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation not supported by your browser');
       return;
     }
 
-    const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
-    if (existingScript) {
-      existingScript.addEventListener('load', initMap);
-      return () => {
-        existingScript.removeEventListener('load', initMap);
-      };
-    }
-
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_API_KEY}&libraries=places&v=weekly`;
-    script.async = true;
-    script.defer = true;
-    script.onload = initMap;
-    document.head.appendChild(script);
-
-    return () => {
-      if (document.head.contains(script)) {
-        script.onload = null;
+    setLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+        setLoading(false);
+        console.log('✅ Location acquired:', position.coords.latitude, position.coords.longitude);
+      },
+      (error) => {
+        console.error('❌ Geolocation error:', error);
+        setLocationError('Unable to get location. Try another search method.');
+        setLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
       }
+    );
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setSearchInputs(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    setError('');
+    setServices([]);
+    setSearchedLocation(null);
+
+    // Build search parameters based on method
+    const params = {
+      type: equipmentType,
+      radius: radius
     };
-  }, []);
 
-  useEffect(() => {
-    if (userLocation && googleMapRef.current) {
-      searchNearbyProviders(userLocation.latitude, userLocation.longitude);
-    }
-  }, [userLocation, equipmentType]);
-
-  const initMap = () => {
-    if (!mapRef.current || !window.google || !window.google.maps) return;
-    if (googleMapRef.current) return;
-
-    const center = { lat: 20.5937, lng: 78.9629 };
-
-    googleMapRef.current = new window.google.maps.Map(mapRef.current, {
-      center,
-      zoom: 4.5,
-      styles: [
-        { elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
-        { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
-        { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
-        {
-          featureType: 'administrative',
-          elementType: 'geometry',
-          stylers: [{ color: '#334155' }]
-        },
-        {
-          featureType: 'road',
-          elementType: 'geometry',
-          stylers: [{ color: '#334155' }]
-        },
-        {
-          featureType: 'water',
-          elementType: 'geometry',
-          stylers: [{ color: '#0f172a' }]
+    switch (searchMethod) {
+      case 'current':
+        if (!location) {
+          setError('Current location not available. Try another search method.');
+          return;
         }
-      ]
-    });
-  };
+        params.lat = location.latitude;
+        params.lng = location.longitude;
+        break;
 
-  const searchNearbyProviders = async (lat, lng) => {
-  setLoading(true);
-  setError(null);
+      case 'pincode':
+        if (!searchInputs.pincode.trim()) {
+          setError('Please enter a pincode');
+          return;
+        }
+        params.pincode = searchInputs.pincode.trim();
+        break;
 
-  try {
-    const response = await api.get('/service-providers', {
-      params: {
-        latitude: lat,
-        longitude: lng,
-        equipmentType: equipmentType,
-        radius: 8000,
-        enhanced: true
-      }
-    });
+      case 'city':
+        if (!searchInputs.city.trim()) {
+          setError('Please enter a city or area name');
+          return;
+        }
+        params.city = searchInputs.city.trim();
+        break;
 
-    const data = response.data;
+      case 'landmark':
+        if (!searchInputs.landmark.trim()) {
+          setError('Please enter a landmark name');
+          return;
+        }
+        params.landmark = searchInputs.landmark.trim();
+        break;
 
-    if (data.success) {
-      setServiceProviders(data.providers || []);
-      updateMapMarkers(data.providers || [], { latitude: lat, longitude: lng });
-    } else {
-      setError(data.error || 'Failed to search providers');
-      setServiceProviders([]);
+      case 'address':
+        if (!searchInputs.address.trim()) {
+          setError('Please enter an address');
+          return;
+        }
+        params.address = searchInputs.address.trim();
+        break;
+
+      case 'coordinates':
+        const lat = parseFloat(searchInputs.latitude);
+        const lng = parseFloat(searchInputs.longitude);
+        
+        if (isNaN(lat) || isNaN(lng)) {
+          setError('Please enter valid coordinates');
+          return;
+        }
+        
+        if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          setError('Coordinates out of range');
+          return;
+        }
+        
+        params.lat = lat;
+        params.lng = lng;
+        break;
+
+      default:
+        setError('Please select a search method');
+        return;
     }
-  } catch (err) {
-    setError('Failed to connect to service.');
-    setServiceProviders([]);
-  } finally {
-    setLoading(false);
-  }
-  };
 
-  const geocodeAndSearch = async () => {
-  if (!searchLocation.trim()) return;
+    setLoading(true);
 
-  setLoading(true);
-  setError(null);
+    try {
+      console.log('🔍 Searching with params:', params);
 
-  try {
-    const response = await api.get('/geocode', {
-      params: { address: searchLocation }
-    });
+      const response = await api.get('/service-locator', { params });
 
-    const data = response.data;
+      console.log('📡 Response:', response.data);
 
-    if (data.success) {
-      const { latitude, longitude } = data.location;
-      setUserLocation({ latitude, longitude });
-      
-      if (googleMapRef.current) {
-        googleMapRef.current.setCenter({ lat: latitude, lng: longitude });
-        googleMapRef.current.setZoom(12);
+      if (response.data.success) {
+        setServices(response.data.places || []);
+        setSearchedLocation(response.data.location);
+        
+        if (response.data.places.length === 0) {
+          setError(response.data.message || 'No service centers found. Try increasing radius or different location.');
+        }
+      } else {
+        setError(response.data.error || 'Failed to find service centers');
       }
-      
-      await searchNearbyProviders(latitude, longitude);
-    } else {
-      setError(data.error || 'Location not found');
+    } catch (err) {
+      console.error('❌ Search error:', err);
+      setError(err.message || 'Failed to search for service centers');
+    } finally {
       setLoading(false);
     }
-  } catch (err) {
-    setError('Failed to find location.');
-    setLoading(false);
-  }
   };
 
-  const openInGoogleMaps = (provider) => {
-    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(provider.name)}&query_place_id=${provider.id}`;
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return (R * c).toFixed(2);
+  };
+
+  const openInMaps = (lat, lng, name) => {
+    const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
     window.open(url, '_blank');
-  };
-
-  const updateMapMarkers = (providers, location) => {
-    if (!googleMapRef.current || !window.google) return;
-
-    // Clear existing markers
-    markersRef.current.forEach(marker => marker.setMap(null));
-    markersRef.current = [];
-
-    const bounds = new window.google.maps.LatLngBounds();
-
-    // Add user location marker
-    if (location) {
-      const userMarker = new window.google.maps.Marker({
-        position: { lat: location.latitude, lng: location.longitude },
-        map: googleMapRef.current,
-        title: 'Your Location',
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#10b981',
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 3
-        },
-        zIndex: 1000
-      });
-      
-      const userInfoWindow = new window.google.maps.InfoWindow({
-        content: `
-          <div style="color: #000; padding: 10px; text-align: center;">
-            <h3 style="margin: 0 0 5px 0; font-size: 16px; font-weight: 700; color: #10b981;">📍 Your Location</h3>
-            <p style="margin: 0; font-size: 13px; color: #666;">Search centered here</p>
-          </div>
-        `
-      });
-
-      userMarker.addListener('click', () => {
-        userInfoWindow.open(googleMapRef.current, userMarker);
-      });
-
-      markersRef.current.push(userMarker);
-      bounds.extend({ lat: location.latitude, lng: location.longitude });
-    }
-
-    // Add provider markers
-    providers.forEach((provider, index) => {
-      const marker = new window.google.maps.Marker({
-        position: { lat: provider.latitude, lng: provider.longitude },
-        map: googleMapRef.current,
-        title: provider.name,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: '#60a5fa',
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 2
-        },
-        animation: window.google.maps.Animation.DROP,
-        zIndex: index
-      });
-
-      const infoWindow = new window.google.maps.InfoWindow({
-        content: `
-          <div style="color: #000; padding: 12px; min-width: 220px; max-width: 300px;">
-            <h3 style="margin: 0 0 10px 0; font-size: 16px; font-weight: 700; color: #1e293b;">${provider.name}</h3>
-            <p style="margin: 0 0 8px 0; font-size: 13px; color: #475569; line-height: 1.4;">
-              📍 ${provider.location}
-            </p>
-            ${provider.rating ? `
-              <div style="margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 14px;">⭐ ${provider.rating.toFixed(1)}</span>
-                <span style="font-size: 12px; color: #64748b;">(${provider.reviews} review${provider.reviews !== 1 ? 's' : ''})</span>
-              </div>
-            ` : ''}
-            ${provider.isOpen !== undefined ? `
-              <p style="margin: 0 0 12px 0; font-size: 12px; font-weight: 600; color: ${provider.isOpen ? '#10b981' : '#ef4444'};">
-                ${provider.isOpen ? '🟢 Open Now' : '🔴 Closed'}
-              </p>
-            ` : ''}
-            <button
-              onclick="window.open('https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(provider.name)}&query_place_id=${provider.id}', '_blank')"
-              style="
-                width: 100%;
-                padding: 10px 16px;
-                background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
-              "
-              onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(37, 99, 235, 0.4)'"
-              onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(37, 99, 235, 0.3)'"
-            >
-              📍 Open in Google Maps
-            </button>
-          </div>
-        `
-      });
-
-      marker.addListener('click', () => {
-        // Close all other info windows
-        markersRef.current.forEach(m => {
-          if (m.infoWindow) {
-            m.infoWindow.close();
-          }
-        });
-        infoWindow.open(googleMapRef.current, marker);
-      });
-
-      marker.infoWindow = infoWindow;
-      markersRef.current.push(marker);
-      bounds.extend({ lat: provider.latitude, lng: provider.longitude });
-    });
-
-    if (markersRef.current.length > 0) {
-      googleMapRef.current.fitBounds(bounds);
-      
-      // Adjust zoom if too close
-      const listener = window.google.maps.event.addListener(googleMapRef.current, 'idle', () => {
-        if (googleMapRef.current.getZoom() > 15) {
-          googleMapRef.current.setZoom(15);
-        }
-        window.google.maps.event.removeListener(listener);
-      });
-    }
-  };
-
-  const detectLocation = () => {
-    setLoadingLocation(true);
-    setError(null);
-
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setUserLocation({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude
-          });
-          setLoadingLocation(false);
-        },
-        (error) => {
-          console.error('Geolocation error:', error);
-          setError('Unable to detect location. Please enter manually or allow location access.');
-          setLoadingLocation(false);
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        }
-      );
-    } else {
-      setError('Geolocation is not supported by your browser.');
-      setLoadingLocation(false);
-    }
-  };
-
-  const handleSearch = () => {
-    if (searchLocation.trim()) {
-      geocodeAndSearch();
-    }
   };
 
   return (
     <div className="service-locator">
       <div className="locator-header">
-        <h2 className="locator-title">🔧 Find Service Centers</h2>
-        <p className="locator-subtitle">
-          Locate trusted maintenance experts near you for equipment repair and servicing
-        </p>
+        <h2>🔧 Service Center Locator</h2>
+        <p>Find nearby equipment repair and maintenance services</p>
       </div>
 
-      <div className="search-section">
-        <div className="search-filters">
-          <div className="filter-group">
-            <label>🔨 Equipment Type</label>
-            <select
-              value={equipmentType}
-              onChange={(e) => setEquipmentType(e.target.value)}
-              className="filter-select"
-            >
-              <option value="all">All Types</option>
-              <option value="laptop">💻 Laptop</option>
-              <option value="phone">📱 Phone</option>
-              <option value="tablet">📱 Tablet</option>
-              <option value="desktop">🖥️ Desktop</option>
-              <option value="industrial_machine">🏭 Industrial Machine</option>
-              <option value="hvac">❄️ HVAC System</option>
-              <option value="motor">⚙️ Motor</option>
-              <option value="pump">💧 Pump</option>
-              <option value="compressor">🔧 Compressor</option>
-            </select>
-          </div>
-
-          <div className="filter-group">
-            <label>📍 Location</label>
-            <div className="location-input-group">
-              <input
-                type="text"
-                value={searchLocation}
-                onChange={(e) => setSearchLocation(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="Enter city, address or zip code"
-                className="filter-input"
-              />
-              <button
-                onClick={handleSearch}
-                disabled={loading || !searchLocation.trim()}
-                className="search-btn"
-                title="Search location"
-              >
-                {loading ? '⏳' : '🔍'}
-              </button>
-              <button
-                onClick={detectLocation}
-                disabled={loadingLocation}
-                className="detect-btn"
-                title="Use my current location"
-              >
-                {loadingLocation ? '⏳' : '📍'}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="error-message">
-            ❌ {error}
-          </div>
-        )}
-
-        {loading && (
-          <div className="location-detected loading">
-            <div className="loading-spinner"></div>
-            <span>🔄 Searching for service providers...</span>
-          </div>
-        )}
-        
-        {userLocation && !loading && !error && (
-          <div className="location-detected success">
-            ✅ Found <strong>{serviceProviders.length}</strong> service provider{serviceProviders.length !== 1 ? 's' : ''} near you. Click markers on the map for details.
-          </div>
-        )}
+      {/* Search Method Selection */}
+      <div className="search-method-tabs">
+        <button
+          className={`tab-btn ${searchMethod === 'current' ? 'active' : ''}`}
+          onClick={() => setSearchMethod('current')}
+        >
+          📍 Current Location
+        </button>
+        <button
+          className={`tab-btn ${searchMethod === 'pincode' ? 'active' : ''}`}
+          onClick={() => setSearchMethod('pincode')}
+        >
+          📮 Pincode
+        </button>
+        <button
+          className={`tab-btn ${searchMethod === 'city' ? 'active' : ''}`}
+          onClick={() => setSearchMethod('city')}
+        >
+          🏙️ City/Area
+        </button>
+        <button
+          className={`tab-btn ${searchMethod === 'landmark' ? 'active' : ''}`}
+          onClick={() => setSearchMethod('landmark')}
+        >
+          🏛️ Landmark
+        </button>
+        <button
+          className={`tab-btn ${searchMethod === 'address' ? 'active' : ''}`}
+          onClick={() => setSearchMethod('address')}
+        >
+          🏠 Address
+        </button>
+        <button
+          className={`tab-btn ${searchMethod === 'coordinates' ? 'active' : ''}`}
+          onClick={() => setSearchMethod('coordinates')}
+        >
+          🗺️ Coordinates
+        </button>
       </div>
 
-      <div className="map-section">
-        <div className="map-header">
-          <h3>
-            📍 {serviceProviders.length} Service {serviceProviders.length === 1 ? 'Provider' : 'Providers'} Found
-          </h3>
-          {serviceProviders.length > 0 && (
-            <p className="map-subtitle">
-              Click on blue markers to view provider details and directions
-            </p>
+      {/* Location Status */}
+      {searchMethod === 'current' && (
+        <div className={`location-status ${location ? 'active' : 'inactive'}`}>
+          {location ? (
+            <>
+              <span className="status-icon">📍</span>
+              <span>Location: {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}</span>
+              <button onClick={getCurrentLocation} className="btn-link">
+                🔄 Refresh
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="status-icon">⚠️</span>
+              <span>{locationError || 'Getting your location...'}</span>
+              {locationError && (
+                <button onClick={getCurrentLocation} className="btn-link">
+                  Try again
+                </button>
+              )}
+            </>
           )}
         </div>
-        <div ref={mapRef} className="google-map"></div>
-      </div>
+      )}
+
+      {/* Searched Location Display */}
+      {searchedLocation && (
+        <div className="searched-location">
+          <span className="status-icon">✅</span>
+          <span>Searching near: {searchedLocation.source || `${searchedLocation.latitude.toFixed(4)}, ${searchedLocation.longitude.toFixed(4)}`}</span>
+        </div>
+      )}
+
+      {/* Search Form */}
+      <form onSubmit={handleSearch} className="locator-form">
+        {/* Pincode Input */}
+        {searchMethod === 'pincode' && (
+          <div className="form-group">
+            <label htmlFor="pincode">📮 Enter Pincode / ZIP Code</label>
+            <input
+              type="text"
+              id="pincode"
+              name="pincode"
+              value={searchInputs.pincode}
+              onChange={handleInputChange}
+              placeholder="e.g., 380001, 400001, 10001"
+              className="form-input"
+              required
+            />
+            <span className="input-hint">Enter your area pincode</span>
+          </div>
+        )}
+
+        {/* City/Area Input */}
+        {searchMethod === 'city' && (
+          <div className="form-group">
+            <label htmlFor="city">🏙️ Enter City or Area Name</label>
+            <input
+              type="text"
+              id="city"
+              name="city"
+              value={searchInputs.city}
+              onChange={handleInputChange}
+              placeholder="e.g., Ahmedabad, Mumbai, Vastrapur"
+              className="form-input"
+              required
+            />
+            <span className="input-hint">City, town, or area name</span>
+          </div>
+        )}
+
+        {/* Landmark Input */}
+        {searchMethod === 'landmark' && (
+          <div className="form-group">
+            <label htmlFor="landmark">🏛️ Enter Landmark</label>
+            <input
+              type="text"
+              id="landmark"
+              name="landmark"
+              value={searchInputs.landmark}
+              onChange={handleInputChange}
+              placeholder="e.g., Gateway of India, Sabarmati Ashram"
+              className="form-input"
+              required
+            />
+            <span className="input-hint">Famous landmark or building</span>
+          </div>
+        )}
+
+        {/* Address Input */}
+        {searchMethod === 'address' && (
+          <div className="form-group">
+            <label htmlFor="address">🏠 Enter Full Address</label>
+            <textarea
+              id="address"
+              name="address"
+              value={searchInputs.address}
+              onChange={handleInputChange}
+              placeholder="e.g., Plot 123, GIDC Estate, Ahmedabad, Gujarat, India"
+              className="form-textarea"
+              rows="3"
+              required
+            />
+            <span className="input-hint">Complete address with city and state</span>
+          </div>
+        )}
+
+        {/* Coordinates Input */}
+        {searchMethod === 'coordinates' && (
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="latitude">Latitude</label>
+              <input
+                type="number"
+                id="latitude"
+                name="latitude"
+                value={searchInputs.latitude}
+                onChange={handleInputChange}
+                placeholder="e.g., 23.0225"
+                step="any"
+                className="form-input"
+                required
+              />
+              <span className="input-hint">-90 to 90</span>
+            </div>
+            <div className="form-group">
+              <label htmlFor="longitude">Longitude</label>
+              <input
+                type="number"
+                id="longitude"
+                name="longitude"
+                value={searchInputs.longitude}
+                onChange={handleInputChange}
+                placeholder="e.g., 72.5714"
+                step="any"
+                className="form-input"
+                required
+              />
+              <span className="input-hint">-180 to 180</span>
+            </div>
+          </div>
+        )}
+
+        {/* Equipment Type */}
+        <div className="form-group">
+          <label htmlFor="equipmentType">⚙️ Equipment Type</label>
+          <select
+            id="equipmentType"
+            value={equipmentType}
+            onChange={(e) => setEquipmentType(e.target.value)}
+            className="form-select"
+          >
+            <option value="motor">Motor</option>
+            <option value="pump">Pump</option>
+            <option value="compressor">Compressor</option>
+            <option value="generator">Generator</option>
+            <option value="turbine">Turbine</option>
+            <option value="conveyor">Conveyor</option>
+          </select>
+        </div>
+
+        {/* Search Radius */}
+        <div className="form-group">
+          <label htmlFor="radius">
+            📏 Search Radius: {(radius / 1000).toFixed(1)} km
+          </label>
+          <input
+            type="range"
+            id="radius"
+            min="1000"
+            max="50000"
+            step="1000"
+            value={radius}
+            onChange={(e) => setRadius(parseInt(e.target.value))}
+            className="form-range"
+          />
+          <div className="range-labels">
+            <span>1 km</span>
+            <span>25 km</span>
+            <span>50 km</span>
+          </div>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="alert alert-error">
+            <span className="alert-icon">⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Submit Button */}
+        <button
+          type="submit"
+          disabled={loading}
+          className="btn btn-primary btn-large"
+        >
+          {loading ? (
+            <>
+              <span className="spinner"></span>
+              <span>Searching...</span>
+            </>
+          ) : (
+            <>
+              <span>🔍</span>
+              <span>Find Service Centers</span>
+            </>
+          )}
+        </button>
+      </form>
+
+      {/* Results */}
+      {services.length > 0 && (
+        <div className="service-results">
+          <div className="results-header">
+            <h3>🎯 Found {services.length} Service Centers</h3>
+            {searchedLocation && (
+              <p className="results-subtitle">
+                Near {searchedLocation.source || 'your location'}
+              </p>
+            )}
+          </div>
+          <div className="services-grid">
+            {services.map((service) => (
+              <div key={service.id} className="service-card">
+                {service.photos && service.photos.length > 0 && (
+                  <div className="service-image">
+                    <img src={service.photos[0].url} alt={service.name} />
+                  </div>
+                )}
+                <div className="service-info">
+                  <h4>{service.name}</h4>
+                  <p className="service-address">📍 {service.address}</p>
+                  
+                  {service.rating && (
+                    <div className="service-rating">
+                      <span className="stars">⭐ {service.rating.toFixed(1)}</span>
+                      <span className="reviews">({service.userRatingsTotal} reviews)</span>
+                    </div>
+                  )}
+                  
+                  {service.openNow !== null && (
+                    <p className={`service-status ${service.openNow ? 'open' : 'closed'}`}>
+                      {service.openNow ? '🟢 Open Now' : '🔴 Closed'}
+                    </p>
+                  )}
+                  
+                  {searchedLocation && (
+                    <p className="service-distance">
+                      📏 {calculateDistance(
+                        searchedLocation.latitude,
+                        searchedLocation.longitude,
+                        service.location.lat,
+                        service.location.lng
+                      )} km away
+                    </p>
+                  )}
+                  
+                  <button
+                    onClick={() => openInMaps(service.location.lat, service.location.lng, service.name)}
+                    className="btn btn-secondary btn-block"
+                  >
+                    🗺️ Open in Google Maps
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* No Results */}
+      {!loading && services.length === 0 && !error && searchedLocation && (
+        <div className="no-results">
+          <span className="no-results-icon">🔍</span>
+          <h3>No Service Centers Found</h3>
+          <p>Try increasing the search radius or searching in a different area.</p>
+        </div>
+      )}
     </div>
   );
-}
+};
 
 export default ServiceLocator;
