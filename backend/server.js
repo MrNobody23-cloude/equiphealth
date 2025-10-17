@@ -1,56 +1,68 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
-const cookieParser = require('cookie-parser');
 const session = require('express-session');
-const passport = require('./config/passport');
+const MongoStore = require('connect-mongo');
+const passport = require('passport');
+const cookieParser = require('cookie-parser');
 const connectDB = require('./config/database');
-
-dotenv.config();
+require('./config/passport');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Connect to database
-connectDB();
+// Trust proxy (important for Render/Heroku deployment)
+app.set('trust proxy', 1);
 
-const corsOptions = {
-  origin: [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    'https://equiphealth-23.web.app',              
-    'https://console.firebase.google.com/project/equiphealth-23/overview',      
-    'http://localhost:5173'                      
-  ],
+// ==================== CORS CONFIGURATION ====================
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://equiphealth-23.web.app',
+  'https://equiphealth-23.firebaseapp.com'
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('⚠️  Blocked origin:', origin);
+      // In development, allow it anyway; in production, block it
+      callback(null, process.env.NODE_ENV !== 'production');
+    }
+  },
   credentials: true,
-  optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-};
-
-app.use(cors(corsOptions));
-
-// Middleware
-app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'http://localhost:5173',
-    'https://equiphealth-23.web.app',
-    'https://console.firebase.google.com/project/equiphealth-23/overview'
-  ],
-  credentials: true,
-  optionsSuccessStatus: 200
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+// ==================== MIDDLEWARE ====================
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Session middleware (for OAuth)
+// Session configuration with MongoDB store (Production Ready)
 app.use(session({
   secret: process.env.SESSION_SECRET || 'your-fallback-secret-key-change-this',
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI,
+    touchAfter: 24 * 3600, // lazy session update
+    crypto: {
+      secret: process.env.SESSION_SECRET || 'session-encryption-secret'
+    }
+  }),
   cookie: {
     secure: process.env.NODE_ENV === 'production', // true in production (HTTPS)
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24 // 24 hours
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
   }
 }));
 
@@ -58,23 +70,23 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Models
+// ==================== MODELS ====================
 const EquipmentHistory = require('./models/EquipmentHistory');
 
-// Controllers
+// ==================== CONTROLLERS ====================
 const mlPredictionController = require('./controllers/mlPrediction');
 const serviceLocatorController = require('./controllers/serviceLocator');
 
-// Middleware
+// ==================== MIDDLEWARE ====================
 const { protect } = require('./middleware/auth');
 const { validatePredictionInput } = require('./utils/validators');
 
-// Routes
+// ==================== ROUTES ====================
 const authRoutes = require('./routes/auth');
 
-// ==================== ROUTES ====================
+// ==================== API ENDPOINTS ====================
 
-// Health check
+// Root endpoint
 app.get('/', (req, res) => {
   res.json({
     message: '🤖 AI Equipment Health Monitor API',
@@ -83,14 +95,39 @@ app.get('/', (req, res) => {
     database: global.dbConnected ? 'connected' : 'in-memory',
     ml_engine: 'Python (scikit-learn)',
     authentication: 'enabled',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      auth: '/api/auth',
+      predict: '/api/predict',
+      history: '/api/history',
+      stats: '/api/stats',
+      serviceProviders: '/api/service-providers'
+    }
+  });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    database: global.dbConnected ? 'connected' : 'disconnected',
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
+    }
   });
 });
 
 // Auth routes
 app.use('/api/auth', authRoutes);
 
-// Protected routes - Equipment health prediction
+// ==================== PROTECTED ROUTES ====================
+
+// Equipment health prediction
 app.post('/api/predict', protect, async (req, res) => {
   try {
     const validation = validatePredictionInput(req.body);
@@ -161,7 +198,7 @@ app.post('/api/predict', protect, async (req, res) => {
   }
 });
 
-// Protected routes - History
+// Get user's prediction history
 app.get('/api/history', protect, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
@@ -206,6 +243,7 @@ app.get('/api/history', protect, async (req, res) => {
   }
 });
 
+// Get single history entry
 app.get('/api/history/:id', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -238,6 +276,7 @@ app.get('/api/history/:id', protect, async (req, res) => {
   }
 });
 
+// Delete single history entry
 app.delete('/api/history/:id', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -271,6 +310,7 @@ app.delete('/api/history/:id', protect, async (req, res) => {
   }
 });
 
+// Clear all history for user
 app.delete('/api/history', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -299,6 +339,7 @@ app.delete('/api/history', protect, async (req, res) => {
   }
 });
 
+// Get user statistics
 app.get('/api/stats', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -370,58 +411,139 @@ app.get('/api/stats', protect, async (req, res) => {
   }
 });
 
-// Service locator routes (protected)
+// Service locator routes
 app.get('/api/service-providers', protect, serviceLocatorController.searchProviders.bind(serviceLocatorController));
 app.get('/api/geocode', protect, serviceLocatorController.geocodeAddress.bind(serviceLocatorController));
 app.get('/api/place/:placeId', protect, serviceLocatorController.getPlaceDetails.bind(serviceLocatorController));
+
+// ==================== ERROR HANDLERS ====================
 
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Endpoint not found',
+    error: 'Route not found',
     path: req.path,
-    method: req.method
+    method: req.method,
+    requestedUrl: req.originalUrl
   });
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('❌ Server error:', err);
-  res.status(500).json({
+  res.status(err.statusCode || 500).json({
     success: false,
     error: process.env.NODE_ENV === 'production' 
       ? 'Internal server error' 
-      : err.message
+      : err.message,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
   });
 });
 
-// Start server
-const startServer = async () => {
-  await connectDB();
+// ==================== EMAIL SERVICE INITIALIZATION ====================
+const initializeEmailService = async () => {
+  try {
+    // Check if email is configured
+    if (!process.env.SENDGRID_API_KEY && !process.env.EMAIL_USERNAME) {
+      console.log('━'.repeat(60));
+      console.log('⚠️  EMAIL SERVICE WARNING');
+      console.log('━'.repeat(60));
+      console.log('Email service not configured!');
+      console.log('Email verification will be disabled.');
+      console.log('');
+      console.log('To enable email features, add ONE of these:');
+      console.log('  Option 1 - SendGrid (Recommended):');
+      console.log('    SENDGRID_API_KEY=your_api_key');
+      console.log('    SENDGRID_FROM_EMAIL=your@email.com');
+      console.log('  Option 2 - Gmail SMTP:');
+      console.log('    EMAIL_USERNAME=your@gmail.com');
+      console.log('    EMAIL_PASSWORD=your_app_password');
+      console.log('━'.repeat(60));
+      return;
+    }
 
-  const { verifyTransporter } = require('./config/email');
-  await verifyTransporter();
-
-  app.listen(PORT, () => {
-    console.log('\n' + '═'.repeat(60));
-    console.log('  🤖 AI EQUIPMENT HEALTH MONITOR SERVER');
-    console.log('═'.repeat(60));
-    console.log(`📡 Server:     https://equiphealth-23.web.app`);
-    console.log(`🗄️  Database:   ${global.dbConnected ? '✅ Connected' : '⚠️  In-Memory Mode'}`);
-    console.log(`🔐 Auth:       ✅ Enabled (JWT + OAuth)`);
-    console.log(`🐍 ML Engine:  Python (scikit-learn)`);
-    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🗺️  Maps API:   ${process.env.GOOGLE_MAPS_API_KEY ? '✅ Configured' : '⚠️  Not Configured'}`);
-    console.log('═'.repeat(60));
-    console.log('🔐 Authentication Methods:');
-    console.log(`   ✅ Local (Email/Password)`);
-    console.log(`   ${process.env.GOOGLE_CLIENT_ID ? '✅' : '⚠️ '} Google OAuth`);
-    console.log(`   ${process.env.GITHUB_CLIENT_ID ? '✅' : '⚠️ '} GitHub OAuth`);
-    console.log('═'.repeat(60) + '\n');
-  });
+    // Try SendGrid first
+    if (process.env.SENDGRID_API_KEY) {
+      const { verifySendGrid } = require('./config/sendgrid');
+      await verifySendGrid();
+      console.log('✅ Email service: SendGrid configured');
+    }
+    // Fallback to Gmail SMTP
+    else if (process.env.EMAIL_USERNAME && process.env.EMAIL_PASSWORD) {
+      const { verifyTransporter } = require('./config/email');
+      await verifyTransporter();
+      console.log('✅ Email service: Gmail SMTP configured');
+    }
+  } catch (error) {
+    console.log('⚠️  Email service initialization failed:', error.message);
+    console.log('ℹ️  App will continue without email functionality');
+  }
 };
 
+// ==================== SERVER STARTUP ====================
+const startServer = async () => {
+  try {
+    // Connect to database
+    await connectDB();
+
+    // Initialize email service (optional)
+    await initializeEmailService();
+
+    // Start Express server
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log('\n' + '═'.repeat(60));
+      console.log('  🤖 AI EQUIPMENT HEALTH MONITOR SERVER');
+      console.log('═'.repeat(60));
+      console.log(`📡 Port:        ${PORT}`);
+      console.log(`🔗 Backend:     ${process.env.BACKEND_URL || 'http://localhost:' + PORT}`);
+      console.log(`🌐 Frontend:    ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+      console.log(`🗄️  Database:    ${global.dbConnected ? '✅ Connected' : '⚠️  In-Memory Mode'}`);
+      console.log(`🐍 ML Engine:   Python (scikit-learn)`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🗺️  Maps API:    ${process.env.GOOGLE_MAPS_API_KEY ? '✅ Configured' : '⚠️  Not Configured'}`);
+      console.log(`💾 Sessions:    MongoDB Store (Production Ready)`);
+      console.log('═'.repeat(60));
+      console.log('🔐 Authentication:');
+      console.log(`   ✅ Local (Email/Password)`);
+      console.log(`   ${process.env.GOOGLE_CLIENT_ID ? '✅' : '⚠️ '} Google OAuth`);
+      console.log(`   ${process.env.GITHUB_CLIENT_ID ? '✅' : '⚠️ '} GitHub OAuth`);
+      console.log('═'.repeat(60));
+      console.log('📍 Available Routes:');
+      console.log('   GET  /                     - API Info');
+      console.log('   GET  /health               - Health Check');
+      console.log('   POST /api/auth/*           - Authentication');
+      console.log('   POST /api/predict          - Equipment Analysis');
+      console.log('   GET  /api/history          - Prediction History');
+      console.log('   GET  /api/stats            - User Statistics');
+      console.log('   GET  /api/service-providers - Service Locator');
+      console.log('═'.repeat(60) + '\n');
+    });
+
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+// ==================== GRACEFUL SHUTDOWN ====================
+const gracefulShutdown = (signal) => {
+  console.log(`\n${signal} received, shutting down gracefully...`);
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Promise Rejection:', err);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});
+
+// Start the server
 startServer();
 
 module.exports = app;
