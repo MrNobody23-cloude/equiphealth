@@ -73,16 +73,28 @@ app.use(passport.session());
 // ==================== MODELS ====================
 const EquipmentHistory = require('./models/EquipmentHistory');
 
-// ==================== CONTROLLERS ====================
-const mlPredictionController = require('./controllers/mlPrediction');
-const serviceLocatorController = require('./controllers/serviceLocator');
-
 // ==================== MIDDLEWARE ====================
 const { protect } = require('./middleware/auth');
 const { validatePredictionInput } = require('./utils/validators');
 
 // ==================== ROUTES ====================
 const authRoutes = require('./routes/auth');
+
+// ==================== CONTROLLERS (with error handling) ====================
+let mlPredictionController;
+let serviceLocatorController;
+
+try {
+  mlPredictionController = require('./controllers/mlPrediction');
+} catch (error) {
+  console.warn('⚠️  ML Prediction controller not found:', error.message);
+}
+
+try {
+  serviceLocatorController = require('./controllers/serviceLocator');
+} catch (error) {
+  console.warn('⚠️  Service Locator controller not found:', error.message);
+}
 
 // ==================== API ENDPOINTS ====================
 
@@ -130,6 +142,14 @@ app.use('/api/auth', authRoutes);
 // Equipment health prediction
 app.post('/api/predict', protect, async (req, res) => {
   try {
+    // Check if controller is available
+    if (!mlPredictionController || !mlPredictionController.analyzeEquipment) {
+      return res.status(503).json({
+        success: false,
+        error: 'ML prediction service is not available'
+      });
+    }
+
     const validation = validatePredictionInput(req.body);
     if (!validation.valid) {
       return res.status(400).json({ 
@@ -411,10 +431,92 @@ app.get('/api/stats', protect, async (req, res) => {
   }
 });
 
-// Service locator routes
-app.get('/api/service-providers', protect, serviceLocatorController.searchProviders.bind(serviceLocatorController));
-app.get('/api/geocode', protect, serviceLocatorController.geocodeAddress.bind(serviceLocatorController));
-app.get('/api/place/:placeId', protect, serviceLocatorController.getPlaceDetails.bind(serviceLocatorController));
+// ==================== SERVICE LOCATOR ROUTES ====================
+
+// Search for service providers
+app.get('/api/service-providers', protect, async (req, res) => {
+  try {
+    if (!serviceLocatorController) {
+      return res.status(503).json({
+        success: false,
+        error: 'Service locator is not available'
+      });
+    }
+
+    // Handle different controller export patterns
+    if (typeof serviceLocatorController.searchProviders === 'function') {
+      return await serviceLocatorController.searchProviders(req, res);
+    } else if (typeof serviceLocatorController === 'function') {
+      // If it's exported as a router, use it
+      return serviceLocatorController(req, res);
+    } else {
+      return res.status(503).json({
+        success: false,
+        error: 'Service provider search method not available'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Service provider search error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Geocode address
+app.get('/api/geocode', protect, async (req, res) => {
+  try {
+    if (!serviceLocatorController) {
+      return res.status(503).json({
+        success: false,
+        error: 'Geocoding service is not available'
+      });
+    }
+
+    if (typeof serviceLocatorController.geocodeAddress === 'function') {
+      return await serviceLocatorController.geocodeAddress(req, res);
+    } else {
+      return res.status(503).json({
+        success: false,
+        error: 'Geocoding method not available'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Geocoding error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get place details
+app.get('/api/place/:placeId', protect, async (req, res) => {
+  try {
+    if (!serviceLocatorController) {
+      return res.status(503).json({
+        success: false,
+        error: 'Place details service is not available'
+      });
+    }
+
+    if (typeof serviceLocatorController.getPlaceDetails === 'function') {
+      return await serviceLocatorController.getPlaceDetails(req, res);
+    } else {
+      return res.status(503).json({
+        success: false,
+        error: 'Place details method not available'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Place details error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // ==================== ERROR HANDLERS ====================
 
@@ -499,9 +601,9 @@ const startServer = async () => {
       console.log(`🔗 Backend:     ${process.env.BACKEND_URL || 'http://localhost:' + PORT}`);
       console.log(`🌐 Frontend:    ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
       console.log(`🗄️  Database:    ${global.dbConnected ? '✅ Connected' : '⚠️  In-Memory Mode'}`);
-      console.log(`🐍 ML Engine:   Python (scikit-learn)`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🐍 ML Engine:   ${mlPredictionController ? '✅ Available' : '⚠️  Not Available'}`);
       console.log(`🗺️  Maps API:    ${process.env.GOOGLE_MAPS_API_KEY ? '✅ Configured' : '⚠️  Not Configured'}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`💾 Sessions:    MongoDB Store (Production Ready)`);
       console.log('═'.repeat(60));
       console.log('🔐 Authentication:');
