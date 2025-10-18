@@ -3,7 +3,7 @@ import api from '../services/api';
 import './ServiceLocator.css';
 
 const ServiceLocator = ({ equipmentList }) => {
-  const [searchMethod, setSearchMethod] = useState('current'); // current, pincode, city, landmark, coordinates
+  const [searchMethod, setSearchMethod] = useState('current');
   const [location, setLocation] = useState(null);
   const [searchInputs, setSearchInputs] = useState({
     pincode: '',
@@ -21,7 +21,6 @@ const ServiceLocator = ({ equipmentList }) => {
   const [locationError, setLocationError] = useState('');
   const [searchedLocation, setSearchedLocation] = useState(null);
 
-  // Get current location on mount
   useEffect(() => {
     if (searchMethod === 'current') {
       getCurrentLocation();
@@ -73,7 +72,6 @@ const ServiceLocator = ({ equipmentList }) => {
     setServices([]);
     setSearchedLocation(null);
 
-    // Build search parameters based on method
     const params = {
       type: equipmentType,
       radius: radius
@@ -149,7 +147,7 @@ const ServiceLocator = ({ equipmentList }) => {
     try {
       console.log('🔍 Searching with params:', params);
 
-      const response = await api.get('/service-locator', { params });
+      const response = await api.get('/service-locator', params);
 
       console.log('📡 Response:', response.data);
 
@@ -195,7 +193,6 @@ const ServiceLocator = ({ equipmentList }) => {
         <p>Find nearby equipment repair and maintenance services</p>
       </div>
 
-      {/* Search Method Selection */}
       <div className="search-method-tabs">
         <button
           className={`tab-btn ${searchMethod === 'current' ? 'active' : ''}`}
@@ -235,7 +232,6 @@ const ServiceLocator = ({ equipmentList }) => {
         </button>
       </div>
 
-      {/* Location Status */}
       {searchMethod === 'current' && (
         <div className={`location-status ${location ? 'active' : 'inactive'}`}>
           {location ? (
@@ -260,7 +256,6 @@ const ServiceLocator = ({ equipmentList }) => {
         </div>
       )}
 
-      {/* Searched Location Display */}
       {searchedLocation && (
         <div className="searched-location">
           <span className="status-icon">✅</span>
@@ -268,9 +263,7 @@ const ServiceLocator = ({ equipmentList }) => {
         </div>
       )}
 
-      {/* Search Form */}
       <form onSubmit={handleSearch} className="locator-form">
-        {/* Pincode Input */}
         {searchMethod === 'pincode' && (
           <div className="form-group">
             <label htmlFor="pincode">📮 Enter Pincode / ZIP Code</label>
@@ -288,7 +281,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         )}
 
-        {/* City/Area Input */}
         {searchMethod === 'city' && (
           <div className="form-group">
             <label htmlFor="city">🏙️ Enter City or Area Name</label>
@@ -306,7 +298,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         )}
 
-        {/* Landmark Input */}
         {searchMethod === 'landmark' && (
           <div className="form-group">
             <label htmlFor="landmark">🏛️ Enter Landmark</label>
@@ -324,7 +315,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         )}
 
-        {/* Address Input */}
         {searchMethod === 'address' && (
           <div className="form-group">
             <label htmlFor="address">🏠 Enter Full Address</label>
@@ -342,7 +332,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         )}
 
-        {/* Coordinates Input */}
         {searchMethod === 'coordinates' && (
           <div className="form-row">
             <div className="form-group">
@@ -378,7 +367,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         )}
 
-        {/* Equipment Type */}
         <div className="form-group">
           <label htmlFor="equipmentType">⚙️ Equipment Type</label>
           <select
@@ -396,7 +384,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </select>
         </div>
 
-        {/* Search Radius */}
         <div className="form-group">
           <label htmlFor="radius">
             📏 Search Radius: {(radius / 1000).toFixed(1)} km
@@ -418,7 +405,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="alert alert-error">
             <span className="alert-icon">⚠️</span>
@@ -426,7 +412,6 @@ const ServiceLocator = ({ equipmentList }) => {
           </div>
         )}
 
-        {/* Submit Button */}
         <button
           type="submit"
           disabled={loading}
@@ -446,7 +431,6 @@ const ServiceLocator = ({ equipmentList }) => {
         </button>
       </form>
 
-      {/* Results */}
       {services.length > 0 && (
         <div className="service-results">
           <div className="results-header">
@@ -506,7 +490,6 @@ const ServiceLocator = ({ equipmentList }) => {
         </div>
       )}
 
-      {/* No Results */}
       {!loading && services.length === 0 && !error && searchedLocation && (
         <div className="no-results">
           <span className="no-results-icon">🔍</span>

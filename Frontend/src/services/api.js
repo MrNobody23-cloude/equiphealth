@@ -6,7 +6,16 @@ class ApiService {
   }
 
   async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
+    let url = `${this.baseURL}${endpoint}`;
+    
+    // Handle query params
+    if (options.params) {
+      const queryString = new URLSearchParams(options.params).toString();
+      if (queryString) {
+        url += `?${queryString}`;
+      }
+      delete options.params; // Remove params from options after using
+    }
     
     const token = localStorage.getItem('token');
     
@@ -43,10 +52,16 @@ class ApiService {
     });
   }
 
-  async get(endpoint) {
-    return this.request(endpoint, {
+  async get(endpoint, params = null) {
+    const options = {
       method: 'GET'
-    });
+    };
+    
+    if (params) {
+      options.params = params;
+    }
+    
+    return this.request(endpoint, options);
   }
 
   async put(endpoint, body) {

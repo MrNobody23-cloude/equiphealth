@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import './Dashboard.css';
-
 import api from '../services/api';
 
 function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, onAddReadings }) {
@@ -11,7 +10,6 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Get devices grouped by name and type
   const getGroupedDevices = () => {
     const grouped = {};
     
@@ -27,7 +25,6 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
       grouped[key].records.push(equipment);
     });
 
-    // Sort records by timestamp (newest first)
     Object.values(grouped).forEach(group => {
       group.records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     });
@@ -63,7 +60,6 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
 
   const stats = getSummaryStats();
 
-  // Filter by time range
   const filterByTimeRange = (equipment) => {
     const timestamp = new Date(equipment.timestamp);
     const now = new Date();
@@ -84,10 +80,9 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
 
   const filteredEquipment = equipmentList.filter(filterByTimeRange);
 
-  // Get latest record for each unique device
   const getLatestRecords = () => {
     return Object.values(groupedDevices).map(group => ({
-      ...group.records[0], // Latest record
+      ...group.records[0],
       totalRecords: group.records.length
     }));
   };
@@ -99,23 +94,23 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
   };
 
   const confirmDelete = async (id) => {
-  setDeleting(true);
-  try {
-    const response = await api.delete(`/history/${id}`); // CHANGED
-    const data = response.data; // CHANGED
+    setDeleting(true);
+    try {
+      const response = await api.delete(`/history/${id}`);
+      const data = response.data;
 
-    if (data.success) {
-      await refreshEquipmentList();
-      setDeleteConfirm(null);
-      setSelectedEquipment(prev => prev?._id === id ? null : prev);
-    } else {
-      alert('Failed to delete: ' + data.error);
+      if (data.success) {
+        await refreshEquipmentList();
+        setDeleteConfirm(null);
+        setSelectedEquipment(prev => prev?._id === id ? null : prev);
+      } else {
+        alert('Failed to delete: ' + data.error);
+      }
+    } catch (error) {
+      alert('Failed to delete equipment.');
+    } finally {
+      setDeleting(false);
     }
-  } catch (error) {
-    alert('Failed to delete equipment.');
-  } finally {
-    setDeleting(false);
-  }
   };
 
   const cancelDelete = () => {
@@ -142,18 +137,12 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
 
     setDeleting(true);
     try {
-      // Delete each record
-      const deletePromises = idsToDelete.map(id =>
-        fetch(`${API_URL}/api/history/${id}`, { method: 'DELETE' })
-      );
-
+      const deletePromises = idsToDelete.map(id => api.delete(`/history/${id}`));
       await Promise.all(deletePromises);
       
       console.log(`✅ Deleted ${idsToDelete.length} records for ${device.name}`);
       
-      // Refresh the equipment list from MongoDB
       await refreshEquipmentList();
-      
       setShowComparison(false);
     } catch (error) {
       console.error('Delete all error:', error);
@@ -435,7 +424,6 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
         )}
       </div>
 
-      {/* Comparison Modal */}
       {showComparison && comparisonDevice && (
         <div className="comparison-modal-overlay" onClick={() => setShowComparison(false)}>
           <div className="comparison-modal" onClick={(e) => e.stopPropagation()}>

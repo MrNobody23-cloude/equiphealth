@@ -11,7 +11,6 @@ require('./config/passport');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Trust proxy (important for Render/Heroku deployment)
 app.set('trust proxy', 1);
 
 // ==================== CORS CONFIGURATION ====================
@@ -25,14 +24,12 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, Postman)
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
       console.log('⚠️  Blocked origin:', origin);
-      // In development, allow it anyway; in production, block it
       callback(null, process.env.NODE_ENV !== 'production');
     }
   },
@@ -46,27 +43,25 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Session configuration with MongoDB store (Production Ready)
 app.use(session({
   secret: process.env.SESSION_SECRET || 'your-fallback-secret-key-change-this',
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({
     mongoUrl: process.env.MONGODB_URI,
-    touchAfter: 24 * 3600, // lazy session update
+    touchAfter: 24 * 3600,
     crypto: {
       secret: process.env.SESSION_SECRET || 'session-encryption-secret'
     }
   }),
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // true in production (HTTPS)
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    maxAge: 24 * 60 * 60 * 1000,
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
   }
 }));
 
-// Passport middleware
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -79,10 +74,10 @@ const { validatePredictionInput } = require('./utils/validators');
 
 // ==================== ROUTES ====================
 const authRoutes = require('./routes/auth');
+const serviceLocatorRoutes = require('./controllers/serviceLocator');
 
-// ==================== CONTROLLERS (with error handling) ====================
+// ==================== CONTROLLERS ====================
 let mlPredictionController;
-let serviceLocatorController;
 
 try {
   mlPredictionController = require('./controllers/mlPrediction');
@@ -90,15 +85,8 @@ try {
   console.warn('⚠️  ML Prediction controller not found:', error.message);
 }
 
-try {
-  serviceLocatorController = require('./controllers/serviceLocator');
-} catch (error) {
-  console.warn('⚠️  Service Locator controller not found:', error.message);
-}
-
 // ==================== API ENDPOINTS ====================
 
-// Root endpoint
 app.get('/', (req, res) => {
   res.json({
     message: '🤖 AI Equipment Health Monitor API',
@@ -113,12 +101,11 @@ app.get('/', (req, res) => {
       predict: '/api/predict',
       history: '/api/history',
       stats: '/api/stats',
-      serviceProviders: '/api/service-providers'
+      serviceLocator: '/api/service-locator'
     }
   });
 });
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
@@ -137,12 +124,13 @@ app.get('/health', (req, res) => {
 // Auth routes
 app.use('/api/auth', authRoutes);
 
+// Service Locator routes
+app.use('/api/service-locator', protect, serviceLocatorRoutes);
+
 // ==================== PROTECTED ROUTES ====================
 
-// Equipment health prediction
 app.post('/api/predict', protect, async (req, res) => {
   try {
-    // Check if controller is available
     if (!mlPredictionController || !mlPredictionController.analyzeEquipment) {
       return res.status(503).json({
         success: false,
@@ -166,7 +154,6 @@ app.post('/api/predict', protect, async (req, res) => {
 
     console.log(`✅ Analysis complete - Health Score: ${prediction.health_score}%`);
 
-    // Save to database with user reference
     if (global.dbConnected) {
       try {
         const history = new EquipmentHistory({
@@ -218,7 +205,6 @@ app.post('/api/predict', protect, async (req, res) => {
   }
 });
 
-// Get user's prediction history
 app.get('/api/history', protect, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
@@ -263,7 +249,6 @@ app.get('/api/history', protect, async (req, res) => {
   }
 });
 
-// Get single history entry
 app.get('/api/history/:id', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -296,7 +281,6 @@ app.get('/api/history/:id', protect, async (req, res) => {
   }
 });
 
-// Delete single history entry
 app.delete('/api/history/:id', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -330,7 +314,6 @@ app.delete('/api/history/:id', protect, async (req, res) => {
   }
 });
 
-// Clear all history for user
 app.delete('/api/history', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -359,7 +342,6 @@ app.delete('/api/history', protect, async (req, res) => {
   }
 });
 
-// Get user statistics
 app.get('/api/stats', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
@@ -431,96 +413,8 @@ app.get('/api/stats', protect, async (req, res) => {
   }
 });
 
-// ==================== SERVICE LOCATOR ROUTES ====================
-
-// Search for service providers
-app.get('/api/service-providers', protect, async (req, res) => {
-  try {
-    if (!serviceLocatorController) {
-      return res.status(503).json({
-        success: false,
-        error: 'Service locator is not available'
-      });
-    }
-
-    // Handle different controller export patterns
-    if (typeof serviceLocatorController.searchProviders === 'function') {
-      return await serviceLocatorController.searchProviders(req, res);
-    } else if (typeof serviceLocatorController === 'function') {
-      // If it's exported as a router, use it
-      return serviceLocatorController(req, res);
-    } else {
-      return res.status(503).json({
-        success: false,
-        error: 'Service provider search method not available'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Service provider search error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Geocode address
-app.get('/api/geocode', protect, async (req, res) => {
-  try {
-    if (!serviceLocatorController) {
-      return res.status(503).json({
-        success: false,
-        error: 'Geocoding service is not available'
-      });
-    }
-
-    if (typeof serviceLocatorController.geocodeAddress === 'function') {
-      return await serviceLocatorController.geocodeAddress(req, res);
-    } else {
-      return res.status(503).json({
-        success: false,
-        error: 'Geocoding method not available'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Geocoding error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Get place details
-app.get('/api/place/:placeId', protect, async (req, res) => {
-  try {
-    if (!serviceLocatorController) {
-      return res.status(503).json({
-        success: false,
-        error: 'Place details service is not available'
-      });
-    }
-
-    if (typeof serviceLocatorController.getPlaceDetails === 'function') {
-      return await serviceLocatorController.getPlaceDetails(req, res);
-    } else {
-      return res.status(503).json({
-        success: false,
-        error: 'Place details method not available'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Place details error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 // ==================== ERROR HANDLERS ====================
 
-// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -531,7 +425,6 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
 app.use((err, req, res, next) => {
   console.error('❌ Server error:', err);
   res.status(err.statusCode || 500).json({
@@ -546,7 +439,6 @@ app.use((err, req, res, next) => {
 // ==================== EMAIL SERVICE INITIALIZATION ====================
 const initializeEmailService = async () => {
   try {
-    // Check if email is configured
     if (!process.env.SENDGRID_API_KEY && !process.env.EMAIL_USERNAME) {
       console.log('━'.repeat(60));
       console.log('⚠️  EMAIL SERVICE WARNING');
@@ -565,13 +457,11 @@ const initializeEmailService = async () => {
       return;
     }
 
-    // Try SendGrid first
     if (process.env.SENDGRID_API_KEY) {
       const { verifySendGrid } = require('./config/sendgrid');
       await verifySendGrid();
       console.log('✅ Email service: SendGrid configured');
     }
-    // Fallback to Gmail SMTP
     else if (process.env.EMAIL_USERNAME && process.env.EMAIL_PASSWORD) {
       const { verifyTransporter } = require('./config/email');
       await verifyTransporter();
@@ -586,13 +476,9 @@ const initializeEmailService = async () => {
 // ==================== SERVER STARTUP ====================
 const startServer = async () => {
   try {
-    // Connect to database
     await connectDB();
-
-    // Initialize email service (optional)
     await initializeEmailService();
 
-    // Start Express server
     app.listen(PORT, '0.0.0.0', () => {
       console.log('\n' + '═'.repeat(60));
       console.log('  🤖 AI EQUIPMENT HEALTH MONITOR SERVER');
@@ -618,7 +504,7 @@ const startServer = async () => {
       console.log('   POST /api/predict          - Equipment Analysis');
       console.log('   GET  /api/history          - Prediction History');
       console.log('   GET  /api/stats            - User Statistics');
-      console.log('   GET  /api/service-providers - Service Locator');
+      console.log('   GET  /api/service-locator  - Service Locator');
       console.log('═'.repeat(60) + '\n');
     });
 
@@ -637,7 +523,6 @@ const gracefulShutdown = (signal) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled Promise Rejection:', err);
   if (process.env.NODE_ENV === 'production') {
@@ -645,7 +530,6 @@ process.on('unhandledRejection', (err) => {
   }
 });
 
-// Start the server
 startServer();
 
 module.exports = app;
