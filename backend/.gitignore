@@ -1,0 +1,168 @@
+# ============================================
+# BACKEND .gitignore
+# Node.js + Express + Python ML
+# ============================================
+
+# ============================================
+# CRITICAL - NEVER COMMIT THESE
+# ============================================
+.env
+.env.*
+.env.local
+.env.development
+.env.test
+.env.production
+!.env.example
+config.json
+secrets.json
+
+# ============================================
+# NODE.JS
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ============================================
+# PYTHON
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+venv/
+ENV/
+env/
+.venv/
+
+# ============================================
+# ML MODELS & DATA
+# ============================================
+python/models/*.pkl
+python/models/*.h5
+python/models/*.hdf5
+python/models/*.joblib
+python/models/*.pth
+python/models/*.pt
+python/data/*.csv
+python/data/*.xlsx
+python/data/*.json
+!python/models/.gitkeep
+!python/data/.gitkeep
+
+# ============================================
+# LOGS
+# ============================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+combined.log
+error.log
+access.log
+exceptions.log
+!logs/.gitkeep
+
+# ============================================
+# DATABASE
+# ============================================
+*.sqlite
+*.sqlite3
+*.db
+data/*.db
+mongodb/
+redis/
+dumps/
+*.dump
+*.sql
+*.bak
+
+# ============================================
+# UPLOADS & STORAGE
+# ============================================
+uploads/*
+!uploads/.gitkeep
+storage/
+temp/
+tmp/
+
+# ============================================
+# TESTING
+# ============================================
+coverage/
+*.coverage
+.nyc_output/
+.pytest_cache/
+htmlcov/
+.tox/
+.nox/
+junit.xml
+
+# ============================================
+# BUILD
+# ============================================
+dist/
+build/
+out/
+
+# ============================================
+# IDE
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ============================================
+# CERTIFICATES & KEYS
+# ============================================
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+ssl/
+certs/
+
+# ============================================
+# SESSION & CACHE
+# ============================================
+.cache/
+sessions/
+*.session
+
+# ============================================
+# BACKUP
+# ============================================
+*.bak
+*.backup
+*.old
+*.orig
+
+# ============================================
+# DEPLOYMENT
+# ============================================
+.vercel
+.netlify
+.serverless/
+
+# ============================================
+# OS SPECIFIC
+# ============================================
+.DS_Store
+Thumbs.db
+Desktop.ini

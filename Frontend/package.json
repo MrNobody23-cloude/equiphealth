@@ -1,0 +1,29 @@
+{
+  "name": "equipment-health-monitor-frontend",
+  "version": "2.0.0",
+  "description": "AI-powered equipment health monitoring system",
+  "type": "module",
+  "homepage": "https://equiphealth-23.web.app/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MrNobody23-cloude/equiphealth.git"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.5.1",
+    "firebase-tools": "^14.20.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.16.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.15",
+    "@types/react-dom": "^18.2.7",
+    "@vitejs/plugin-react": "^4.0.3",
+    "vite": "^4.4.5"
+  }
+}
