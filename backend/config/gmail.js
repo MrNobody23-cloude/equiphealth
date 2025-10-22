@@ -6,6 +6,8 @@ class GmailService {
     this.oauth2Client = null;
     this.transporter = null;
     this.initialized = false;
+    this.accessToken = null;
+    this.tokenExpiry = null;
   }
 
   // Get redirect URI based on environment
@@ -32,18 +34,16 @@ class GmailService {
         redirectUri || this.getRedirectUri()
       );
 
-      const authUrl = oauth2Client.generateAuthUrl({
+      return oauth2Client.generateAuthUrl({
         access_type: 'offline',
-        prompt: 'consent', // Force consent screen to get refresh token
+        prompt: 'consent',
         scope: [
           'https://www.googleapis.com/auth/gmail.send',
           'https://www.googleapis.com/auth/userinfo.email'
         ]
       });
-
-      return authUrl;
     } catch (error) {
-      console.error('Error generating auth URL:', error);
+      console.error('❌ Error generating auth URL:', error);
       throw error;
     }
   }
@@ -70,18 +70,50 @@ class GmailService {
       console.log('✅ Tokens received successfully');
       if (tokens.refresh_token) {
         console.log('✅ Refresh token obtained');
-      } else {
-        console.log('⚠️  No refresh token - you may have authorized before');
       }
       
       return tokens;
     } catch (error) {
-      console.error('Error exchanging code for tokens:', error);
-      throw new Error(`Failed to get tokens: ${error.message}`);
+      console.error('❌ Error exchanging code for tokens:', error);
+      throw error;
     }
   }
 
-  // Initialize Gmail service with OAuth2
+  // Get or refresh access token
+  async getAccessToken() {
+    try {
+      // Check if we have a valid cached token
+      if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+        console.log('🔑 Using cached access token');
+        return this.accessToken;
+      }
+
+      if (!this.oauth2Client) {
+        throw new Error('OAuth2 client not initialized');
+      }
+
+      console.log('🔄 Refreshing access token...');
+      
+      const { credentials } = await this.oauth2Client.refreshAccessToken();
+      
+      if (!credentials.access_token) {
+        throw new Error('Failed to obtain access token');
+      }
+
+      // Cache the token
+      this.accessToken = credentials.access_token;
+      this.tokenExpiry = Date.now() + (credentials.expiry_date ? credentials.expiry_date - Date.now() - 300000 : 3300000); // 5 min buffer
+      
+      console.log('✅ Access token refreshed successfully');
+      return this.accessToken;
+
+    } catch (error) {
+      console.error('❌ Failed to get access token:', error.message);
+      throw error;
+    }
+  }
+
+  // Initialize Gmail service
   async initialize() {
     try {
       const {
@@ -94,14 +126,11 @@ class GmailService {
       // Validate required credentials
       if (!GMAIL_CLIENT_ID || !GMAIL_CLIENT_SECRET) {
         console.log('⚠️  Gmail OAuth credentials not set');
-        console.log('   Required: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET');
         return false;
       }
 
       if (!GMAIL_REFRESH_TOKEN) {
         console.log('⚠️  GMAIL_REFRESH_TOKEN not set');
-        console.log(`   Visit: ${this.getRedirectUri().replace('/callback', '/authorize')}`);
-        console.log('   to complete OAuth2 authorization');
         return false;
       }
 
@@ -122,16 +151,13 @@ class GmailService {
         refresh_token: GMAIL_REFRESH_TOKEN
       });
 
-      // Test getting access token
+      // Get initial access token
       try {
-        const { token } = await this.oauth2Client.getAccessToken();
-        if (!token) {
-          throw new Error('Failed to obtain access token');
-        }
-        console.log('✅ OAuth2 access token obtained successfully');
+        await this.getAccessToken();
+        console.log('✅ OAuth2 initialized with valid access token');
       } catch (tokenError) {
-        console.error('❌ Failed to get access token:', tokenError.message);
-        throw new Error('Invalid or expired refresh token. Re-authorize at /auth/gmail/authorize');
+        console.error('❌ Failed to get initial access token:', tokenError.message);
+        throw new Error('Invalid refresh token. Re-authorize at /auth/gmail/authorize');
       }
 
       this.initialized = true;
@@ -148,18 +174,8 @@ class GmailService {
   // Create transporter with fresh access token
   async createTransporter() {
     try {
-      if (!this.oauth2Client) {
-        throw new Error('OAuth2 client not initialized');
-      }
+      const accessToken = await this.getAccessToken();
 
-      // Get fresh access token
-      const { token } = await this.oauth2Client.getAccessToken();
-
-      if (!token) {
-        throw new Error('Failed to obtain access token');
-      }
-
-      // Create transporter with OAuth2
       const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
@@ -168,15 +184,28 @@ class GmailService {
           clientId: process.env.GMAIL_CLIENT_ID,
           clientSecret: process.env.GMAIL_CLIENT_SECRET,
           refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-          accessToken: token
+          accessToken: accessToken
         },
-        tls: {
-          rejectUnauthorized: process.env.NODE_ENV === 'production'
+        // Connection settings optimized for Render
+        pool: true,
+        maxConnections: 1,
+        maxMessages: 3,
+        rateDelta: 1000,
+        rateLimit: 3,
+        connectionTimeout: 30000, // 30 seconds
+        greetingTimeout: 30000,
+        socketTimeout: 30000,
+        // Retry configuration
+        retry: {
+          times: 3,
+          delay: 1000
         }
       });
 
-      // Verify transporter
+      // Verify connection
       await transporter.verify();
+      console.log('✅ SMTP transporter created and verified');
+
       return transporter;
 
     } catch (error) {
@@ -185,18 +214,22 @@ class GmailService {
     }
   }
 
-  // Send email using OAuth2
-  async sendEmail({ email, subject, html, text }) {
+  // Send email with retry logic
+  async sendEmail({ email, subject, html, text }, retryCount = 0) {
+    const maxRetries = 3;
+    
     // Initialize if not already done
     if (!this.initialized) {
       const success = await this.initialize();
       if (!success) {
-        throw new Error('Gmail service not initialized. Complete OAuth2 setup at /auth/gmail/authorize');
+        throw new Error('Gmail service not initialized. Complete setup at /auth/gmail/authorize');
       }
     }
 
     try {
-      // Create fresh transporter with new access token
+      console.log(`📧 Sending email to: ${email} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      
+      // Create fresh transporter
       const transporter = await this.createTransporter();
 
       const mailOptions = {
@@ -204,7 +237,14 @@ class GmailService {
         to: email,
         subject: subject,
         html: html,
-        text: text || this.stripHtml(html)
+        text: text || this.stripHtml(html),
+        // Add headers for better deliverability
+        headers: {
+          'X-Mailer': 'Equipment Health Monitor',
+          'X-Priority': '3',
+          'X-MSMail-Priority': 'Normal',
+          'Importance': 'Normal'
+        }
       };
 
       const result = await transporter.sendMail(mailOptions);
@@ -214,6 +254,9 @@ class GmailService {
       console.log(`   Subject: ${subject}`);
       console.log(`   Message ID: ${result.messageId}`);
       
+      // Close transporter
+      transporter.close();
+      
       return {
         success: true,
         messageId: result.messageId,
@@ -221,15 +264,31 @@ class GmailService {
       };
 
     } catch (error) {
-      console.error('❌ Email sending failed:', error.message);
+      console.error(`❌ Email sending failed (attempt ${retryCount + 1}):`, error.message);
       
-      // Handle specific error cases
-      if (error.message.includes('invalid_grant')) {
-        throw new Error('Gmail refresh token expired or revoked. Please re-authorize at /auth/gmail/authorize');
+      // Handle specific errors
+      if (error.message.includes('invalid_grant') || error.message.includes('Token has been expired or revoked')) {
+        // Clear cached token and retry
+        this.accessToken = null;
+        this.tokenExpiry = null;
+        
+        if (retryCount < maxRetries) {
+          console.log('🔄 Token expired, refreshing and retrying...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return this.sendEmail({ email, subject, html, text }, retryCount + 1);
+        }
+        throw new Error('Gmail refresh token expired. Re-authorize at /auth/gmail/authorize');
       }
       
       if (error.message.includes('Invalid login')) {
-        throw new Error('Gmail authentication failed. Check your OAuth2 credentials.');
+        throw new Error('Gmail authentication failed. Check OAuth2 credentials.');
+      }
+
+      // Retry on network errors
+      if ((error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.code === 'ESOCKET') && retryCount < maxRetries) {
+        console.log(`🔄 Network error, retrying in ${(retryCount + 1) * 2} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+        return this.sendEmail({ email, subject, html, text }, retryCount + 1);
       }
       
       throw error;
@@ -246,52 +305,70 @@ class GmailService {
             <meta charset="UTF-8">
             <style>
               body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 line-height: 1.6;
                 color: #333;
                 max-width: 600px;
                 margin: 0 auto;
                 padding: 20px;
+                background: #f5f5f5;
               }
               .container {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                border-radius: 10px;
+                border-radius: 12px;
                 overflow: hidden;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
               }
               .header {
                 background: rgba(255,255,255,0.95);
-                padding: 30px;
+                padding: 40px;
                 text-align: center;
               }
               .header h1 {
                 margin: 0;
                 color: #667eea;
-                font-size: 28px;
+                font-size: 32px;
               }
               .content {
                 background: white;
-                padding: 30px;
+                padding: 40px;
               }
               .success-icon {
-                font-size: 64px;
+                font-size: 72px;
                 text-align: center;
                 margin: 20px 0;
               }
               .info-box {
                 background: #f3f4f6;
                 border-left: 4px solid #667eea;
-                padding: 15px;
-                margin: 20px 0;
+                padding: 20px;
+                margin: 25px 0;
                 border-radius: 4px;
               }
               .info-box strong {
                 color: #667eea;
+                display: block;
+                margin-bottom: 10px;
               }
               .footer {
                 text-align: center;
-                padding: 20px;
-                color: rgba(255,255,255,0.9);
+                padding: 30px;
+                color: rgba(255,255,255,0.95);
                 font-size: 14px;
+              }
+              table {
+                width: 100%;
+                margin-top: 10px;
+              }
+              td {
+                padding: 5px 0;
+              }
+              .label {
+                font-weight: 600;
+                color: #555;
+              }
+              .value {
+                color: #777;
               }
             </style>
           </head>
@@ -302,25 +379,56 @@ class GmailService {
               </div>
               <div class="content">
                 <div class="success-icon">✅</div>
-                <h2 style="text-align: center; color: #10b981;">Test Successful!</h2>
+                <h2 style="text-align: center; color: #10b981; margin: 0 0 20px 0;">Test Successful!</h2>
                 <p style="text-align: center; font-size: 16px;">
                   Your Gmail OAuth2 integration is working perfectly!
                 </p>
                 <div class="info-box">
-                  <strong>Configuration Details:</strong><br>
-                  • Authentication: OAuth2<br>
-                  • Service: Gmail API<br>
-                  • From: ${process.env.GMAIL_USER_EMAIL}<br>
-                  • Time: ${new Date().toLocaleString()}<br>
-                  • Environment: ${process.env.NODE_ENV || 'development'}
+                  <strong>📊 Configuration Details:</strong>
+                  <table>
+                    <tr>
+                      <td class="label">Authentication:</td>
+                      <td class="value">OAuth2</td>
+                    </tr>
+                    <tr>
+                      <td class="label">Service:</td>
+                      <td class="value">Gmail API</td>
+                    </tr>
+                    <tr>
+                      <td class="label">From:</td>
+                      <td class="value">${process.env.GMAIL_USER_EMAIL}</td>
+                    </tr>
+                    <tr>
+                      <td class="label">Time:</td>
+                      <td class="value">${new Date().toLocaleString()}</td>
+                    </tr>
+                    <tr>
+                      <td class="label">Environment:</td>
+                      <td class="value">${process.env.NODE_ENV || 'development'}</td>
+                    </tr>
+                    <tr>
+                      <td class="label">Server:</td>
+                      <td class="value">Render.com</td>
+                    </tr>
+                  </table>
                 </div>
-                <p>
-                  Your Equipment Health Monitor application is now ready to send email notifications
-                  for equipment diagnostics, alerts, and reports.
+                <p style="margin-top: 25px;">
+                  Your Equipment Health Monitor application is now fully configured to send email notifications
+                  for equipment diagnostics, alerts, maintenance schedules, and critical system reports.
+                </p>
+                <p style="background: #e0f2fe; padding: 15px; border-radius: 6px; border-left: 4px solid #0284c7; margin-top: 20px;">
+                  <strong style="color: #0369a1;">💡 Next Steps:</strong><br>
+                  Email notifications are now active for:<br>
+                  • Equipment health alerts<br>
+                  • Predictive maintenance warnings<br>
+                  • System diagnostics reports<br>
+                  • Critical failure notifications
                 </p>
               </div>
               <div class="footer">
-                Equipment Health Monitor | Powered by AI
+                <strong>Equipment Health Monitor</strong><br>
+                Powered by AI & Machine Learning<br>
+                © ${new Date().getFullYear()} EquipHealth Team
               </div>
             </div>
           </body>
@@ -329,7 +437,7 @@ class GmailService {
 
       return await this.sendEmail({
         email: recipientEmail,
-        subject: '✅ Gmail OAuth2 Test - Success!',
+        subject: '✅ Gmail OAuth2 Test - Success! | Equipment Health Monitor',
         html: testHtml
       });
 
@@ -338,7 +446,7 @@ class GmailService {
     }
   }
 
-  // Strip HTML tags from content
+  // Strip HTML tags
   stripHtml(html) {
     if (!html) return '';
     return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
@@ -354,9 +462,16 @@ class GmailService {
         }
       }
       
-      // Try to create a transporter to verify everything works
-      await this.createTransporter();
-      console.log('✅ Gmail OAuth2 service verified and ready');
+      console.log('🔍 Verifying Gmail SMTP connection...');
+      
+      // Create and verify transporter
+      const transporter = await this.createTransporter();
+      
+      console.log('✅ Gmail OAuth2 service verified and ready to send emails');
+      
+      // Close transporter
+      transporter.close();
+      
       return true;
       
     } catch (error) {
@@ -373,9 +488,22 @@ class GmailService {
       hasClientSecret: !!process.env.GMAIL_CLIENT_SECRET,
       hasRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,
       hasUserEmail: !!process.env.GMAIL_USER_EMAIL,
+      hasAccessToken: !!this.accessToken,
+      tokenExpiry: this.tokenExpiry ? new Date(this.tokenExpiry).toISOString() : null,
       method: 'OAuth2',
       redirectUri: this.getRedirectUri()
     };
+  }
+
+  // Force reinitialize
+  async reinitialize() {
+    console.log('🔄 Force reinitializing Gmail service...');
+    this.initialized = false;
+    this.oauth2Client = null;
+    this.transporter = null;
+    this.accessToken = null;
+    this.tokenExpiry = null;
+    return await this.initialize();
   }
 }
 

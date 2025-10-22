@@ -1013,42 +1013,86 @@ app.use((err, req, res, next) => {
 
 // ==================== INITIALIZATION ====================
 
+// ==================== EMAIL SERVICE INITIALIZATION ====================
 const initializeEmailService = async () => {
   try {
-    console.log('\n📧 Initializing Gmail OAuth2 Service...');
+    console.log('\n' + '━'.repeat(60));
+    console.log('📧 GMAIL OAUTH2 SERVICE INITIALIZATION');
+    console.log('━'.repeat(60));
+
     const status = gmailService.getStatus();
     
     console.log('Configuration Check:');
-    console.log(`   GMAIL_CLIENT_ID:     ${status.hasClientId ? '✅' : '❌'}`);
-    console.log(`   GMAIL_CLIENT_SECRET: ${status.hasClientSecret ? '✅' : '❌'}`);
-    console.log(`   GMAIL_REFRESH_TOKEN: ${status.hasRefreshToken ? '✅' : '❌'}`);
-    console.log(`   GMAIL_USER_EMAIL:    ${status.hasUserEmail ? '✅' : '❌'}`);
+    console.log(`   GMAIL_CLIENT_ID:     ${status.hasClientId ? '✅ Configured' : '❌ Missing'}`);
+    console.log(`   GMAIL_CLIENT_SECRET: ${status.hasClientSecret ? '✅ Configured' : '❌ Missing'}`);
+    console.log(`   GMAIL_REFRESH_TOKEN: ${status.hasRefreshToken ? '✅ Configured' : '❌ Missing'}`);
+    console.log(`   GMAIL_USER_EMAIL:    ${status.hasUserEmail ? '✅ Configured' : '❌ Missing'}`);
+    console.log(`   Redirect URI:        ${status.redirectUri}`);
     
     if (!status.hasClientId || !status.hasClientSecret) {
-      console.log('⚠️  Gmail OAuth credentials not set in .env');
+      console.log('\n⚠️  Gmail OAuth credentials not configured in environment variables');
+      console.log('   Add GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET to enable email');
+      console.log('━'.repeat(60));
       return false;
     }
     
     if (!status.hasRefreshToken) {
       const setupUrl = status.redirectUri.replace('/callback', '/authorize');
-      console.log('⚠️  Gmail refresh token not found');
-      console.log(`   Setup at: ${setupUrl}`);
+      console.log('\n⚠️  Gmail refresh token not found');
+      console.log(`\n   Complete OAuth2 setup:`);
+      console.log(`   1. Visit: ${setupUrl}`);
+      console.log(`   2. Authorize with your Gmail account`);
+      console.log(`   3. Copy the refresh token`);
+      console.log(`   4. Add GMAIL_REFRESH_TOKEN to environment variables`);
+      console.log('━'.repeat(60));
       return false;
     }
 
+    if (!status.hasUserEmail) {
+      console.log('\n⚠️  GMAIL_USER_EMAIL not configured');
+      console.log('   Add the authorized Gmail address to environment variables');
+      console.log('━'.repeat(60));
+      return false;
+    }
+
+    console.log('\n🔄 Initializing Gmail OAuth2 client...');
     const initialized = await gmailService.initialize();
     
-    if (initialized) {
-      await gmailService.verify();
-      console.log('✅ Gmail OAuth2 service is ready\n');
+    if (!initialized) {
+      console.log('❌ Gmail initialization failed');
+      console.log('━'.repeat(60));
+      return false;
+    }
+
+    console.log('✅ Gmail OAuth2 client initialized');
+    console.log('\n🔍 Verifying SMTP connection...');
+    
+    const verified = await gmailService.verify();
+    
+    if (verified) {
+      console.log('✅ Gmail SMTP connection verified');
+      console.log(`✅ Email service ready: ${process.env.GMAIL_USER_EMAIL}`);
+      console.log('\n📬 Email notifications enabled for:');
+      console.log('   • User registration & verification');
+      console.log('   • Password reset requests');
+      console.log('   • Equipment health alerts');
+      console.log('   • Predictive maintenance warnings');
+      console.log('   • System notifications');
+      console.log('━'.repeat(60));
       return true;
+    } else {
+      console.log('⚠️  SMTP verification failed but service is configured');
+      console.log('   Emails will be attempted when needed');
+      console.log('━'.repeat(60));
+      return true; // Return true to allow app to continue
     }
     
-    console.log('❌ Gmail initialization failed\n');
-    return false;
-    
   } catch (error) {
-    console.error('❌ Email service error:', error.message);
+    console.error('❌ Email service initialization error:', error.message);
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('   Stack trace:', error.stack);
+    }
+    console.log('━'.repeat(60));
     return false;
   }
 };
