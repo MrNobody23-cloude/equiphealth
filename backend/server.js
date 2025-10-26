@@ -379,6 +379,30 @@ app.get('/health', (req, res) => {
 const authRoutes = require('./routes/auth');
 app.use('/api/auth', authRoutes);
 
+// ==================== GOOGLE MAPS SCRIPT PROXY ====================
+
+app.get('/api/maps/config', (req, res) => {
+  // Only return key to allowed origins
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://equiphealth-23.web.app',
+    'https://equiphealth-23.firebaseapp.com'
+  ];
+
+  const origin = req.headers.origin;
+  
+  if (!allowedOrigins.includes(origin)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  res.json({
+    apiKey: process.env.GOOGLE_MAPS_API_KEY,
+    scriptUrl: `https://maps.googleapis.com/maps/api/js?key=${process.env.GOOGLE_MAPS_API_KEY}&libraries=places&loading=async`
+  });
+});
+
 // ==================== SERVICE LOCATOR ROUTES ====================
 
 console.log('🔧 Registering Service Locator routes...');
