@@ -7,7 +7,7 @@ const passport = require('passport');
 const cookieParser = require('cookie-parser');
 const connectDB = require('./config/database');
 require('./config/passport');
-const gmailService = require('./config/gmail');
+const emailService = require('./config/emailService');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -74,14 +74,30 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==================== MODELS ====================
+const EquipmentHistory = require('./models/EquipmentHistory');
+
+// ==================== MIDDLEWARE ====================
+const { protect } = require('./middleware/auth');
+const { validatePredictionInput } = require('./utils/validators');
+
+// ==================== CONTROLLERS ====================
+let mlPredictionController;
+try {
+  mlPredictionController = require('./controllers/mlPrediction');
+} catch (error) {
+  console.warn('⚠️  ML controller not found:', error.message);
+}
+
 // ==================== GMAIL OAUTH2 ROUTES ====================
 
 console.log('\n🔧 Registering Gmail OAuth2 routes...');
 
-// Route 1: Gmail Status
+// Gmail Status
 app.get('/auth/gmail/status', (req, res) => {
   console.log('✅ /auth/gmail/status route handler executed');
   try {
+    const gmailService = require('./config/gmail');
     const status = gmailService.getStatus();
     const allConfigured = status.hasClientId && status.hasClientSecret && 
                          status.hasRefreshToken && status.hasUserEmail;
@@ -114,10 +130,11 @@ app.get('/auth/gmail/status', (req, res) => {
   }
 });
 
-// Route 2: Gmail Authorization
+// Gmail Authorization
 app.get('/auth/gmail/authorize', (req, res) => {
   console.log('✅ /auth/gmail/authorize route handler executed');
   try {
+    const gmailService = require('./config/gmail');
     const authUrl = gmailService.getAuthUrl();
     console.log('🔗 Redirecting to Google OAuth...');
     res.redirect(authUrl);
@@ -126,488 +143,69 @@ app.get('/auth/gmail/authorize', (req, res) => {
     res.status(500).send(`
       <!DOCTYPE html>
       <html>
-      <head>
-        <title>Authorization Error</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-          body { font-family: Arial; padding: 40px; max-width: 600px; margin: 0 auto; background: #fee2e2; }
-          .error { background: white; padding: 30px; border-radius: 12px; border-left: 4px solid #ef4444; }
-          h1 { color: #dc2626; margin-top: 0; }
-          a { color: #2563eb; text-decoration: none; font-weight: 600; }
-          a:hover { text-decoration: underline; }
-        </style>
-      </head>
+      <head><title>Authorization Error</title></head>
       <body>
-        <div class="error">
-          <h1>❌ Authorization Error</h1>
-          <p><strong>Failed to start OAuth flow</strong></p>
-          <p>Error: ${error.message}</p>
-          <p style="margin-top: 20px;">
-            <a href="/">← Back to Home</a>
-          </p>
-        </div>
+        <h1>❌ Authorization Error</h1>
+        <p>${error.message}</p>
+        <a href="/">← Back to Home</a>
       </body>
       </html>
     `);
   }
 });
 
-// Route 3: Gmail Callback
+// Gmail Callback
 app.get('/auth/gmail/callback', async (req, res) => {
   console.log('✅ /auth/gmail/callback route handler executed');
-  console.log('Query params:', Object.keys(req.query));
-  
   try {
+    const gmailService = require('./config/gmail');
     const { code, error } = req.query;
     
-    // Handle OAuth errors
     if (error) {
-      console.error('❌ OAuth error from Google:', error);
-      
-      if (error === 'access_denied') {
-        return res.send(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <title>Access Denied</title>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-              body {
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                padding: 40px;
-                max-width: 700px;
-                margin: 0 auto;
-                background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-              }
-              .container {
-                background: white;
-                padding: 40px;
-                border-radius: 16px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.15);
-                border-left: 6px solid #f59e0b;
-              }
-              h1 { color: #92400e; margin: 0 0 20px 0; }
-              p { color: #78350f; line-height: 1.6; margin: 10px 0; }
-              .note {
-                background: #dbeafe;
-                padding: 20px;
-                border-radius: 8px;
-                margin: 25px 0;
-                border-left: 4px solid #3b82f6;
-              }
-              ol { margin: 10px 0; padding-left: 25px; color: #1e3a8a; }
-              li { margin: 8px 0; line-height: 1.5; }
-              a { color: #2563eb; text-decoration: none; font-weight: 600; }
-              a:hover { text-decoration: underline; }
-              .btn {
-                display: inline-block;
-                background: #3b82f6;
-                color: white;
-                padding: 12px 24px;
-                border-radius: 8px;
-                text-decoration: none;
-                margin-top: 20px;
-              }
-              .btn:hover { background: #2563eb; text-decoration: none; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <h1>⚠️ Access Denied</h1>
-              <p>You canceled the Gmail authorization process.</p>
-              <div class="note">
-                <strong style="color: #1e40af;">💡 To enable Gmail integration:</strong>
-                <ol>
-                  <li>Make sure you're using the correct Google account</li>
-                  <li>Ensure this email is added as a test user in Google Cloud Console</li>
-                  <li>Try authorizing again and click "Allow" when prompted</li>
-                </ol>
-              </div>
-              <a href="/auth/gmail/authorize" class="btn">🔄 Try Again</a>
-            </div>
-          </body>
-          </html>
-        `);
-      }
-      
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>OAuth Error</title>
-          <meta charset="UTF-8">
-          <style>
-            body { font-family: Arial; padding: 40px; max-width: 600px; margin: 0 auto; background: #fee2e2; }
-            .error { background: white; padding: 30px; border-radius: 12px; border-left: 4px solid #ef4444; }
-            h1 { color: #dc2626; }
-            a { color: #2563eb; text-decoration: none; font-weight: 600; }
-          </style>
-        </head>
-        <body>
-          <div class="error">
-            <h1>❌ OAuth Error</h1>
-            <p>Error from Google: <strong>${error}</strong></p>
-            <p style="margin-top: 20px;">
-              <a href="/auth/gmail/authorize">← Try Again</a>
-            </p>
-          </div>
-        </body>
-        </html>
-      `);
+      return res.status(400).send(`<h1>❌ OAuth Error: ${error}</h1><a href="/auth/gmail/authorize">Try Again</a>`);
     }
     
     if (!code) {
-      console.error('❌ No authorization code received');
-      return res.status(400).send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Missing Code</title>
-          <meta charset="UTF-8">
-          <style>
-            body { font-family: Arial; padding: 40px; max-width: 600px; margin: 0 auto; background: #fee2e2; }
-            .error { background: white; padding: 30px; border-radius: 12px; border-left: 4px solid #ef4444; }
-            h1 { color: #dc2626; }
-            a { color: #2563eb; text-decoration: none; font-weight: 600; }
-          </style>
-        </head>
-        <body>
-          <div class="error">
-            <h1>❌ Missing Authorization Code</h1>
-            <p>No authorization code was received from Google.</p>
-            <p style="margin-top: 20px;">
-              <a href="/auth/gmail/authorize">← Try Again</a>
-            </p>
-          </div>
-        </body>
-        </html>
-      `);
+      return res.status(400).send('<h1>❌ Missing authorization code</h1><a href="/auth/gmail/authorize">Try Again</a>');
     }
     
-    console.log('🔑 Exchanging authorization code for tokens...');
     const tokens = await gmailService.getTokens(code);
-    console.log('✅ Tokens received:', {
-      hasAccessToken: !!tokens.access_token,
-      hasRefreshToken: !!tokens.refresh_token
-    });
-    
-    // Get backend URL for instructions
     const backendUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
     
-    // Success page - NO HARDCODED SECRETS
     res.send(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Gmail OAuth2 Success ✅</title>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Gmail OAuth2 Success</title>
         <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .container {
-            background: white;
-            padding: 40px;
-            border-radius: 16px;
-            max-width: 900px;
-            width: 100%;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-          }
-          h1 { color: #10b981; font-size: 32px; margin-bottom: 15px; }
-          h2 { color: #1f2937; font-size: 24px; margin: 30px 0 15px; }
-          h3 { color: #374151; font-size: 18px; margin: 20px 0 10px; }
-          p { color: #6b7280; line-height: 1.6; margin-bottom: 15px; }
-          .token-box {
-            background: #1f2937;
-            color: #10b981;
-            padding: 15px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-            word-break: break-all;
-            max-height: 150px;
-            overflow-y: auto;
-            margin: 15px 0;
-            border: 2px solid #374151;
-          }
-          .copy-btn {
-            background: #3b82f6;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-top: 10px;
-            transition: all 0.2s;
-          }
-          .copy-btn:hover { background: #2563eb; transform: translateY(-1px); }
-          .warning {
-            background: #fef3c7;
-            padding: 20px;
-            border-radius: 8px;
-            border-left: 4px solid #f59e0b;
-            margin: 20px 0;
-          }
-          .warning strong { color: #92400e; font-size: 16px; }
-          .steps {
-            background: #f3f4f6;
-            padding: 25px;
-            border-radius: 8px;
-            margin: 20px 0;
-          }
-          .steps ol { margin: 15px 0; padding-left: 25px; }
-          .steps li { margin: 12px 0; line-height: 1.8; color: #374151; }
-          code {
-            background: #1f2937;
-            color: #10b981;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            font-size: 13px;
-          }
-          small {
-            display: block;
-            color: #9ca3af;
-            margin-top: 5px;
-            font-size: 13px;
-          }
-          .info-box {
-            background: #dbeafe;
-            padding: 20px;
-            border-radius: 8px;
-            border-left: 4px solid #3b82f6;
-            margin: 20px 0;
-          }
-          .credential-placeholder {
-            color: #9ca3af;
-            font-style: italic;
-          }
+          body { font-family: Arial; max-width: 800px; margin: 40px auto; padding: 20px; }
+          .token-box { background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; margin: 20px 0; }
+          .copy-btn { background: #4285f4; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
         </style>
       </head>
       <body>
-        <div class="container">
-          <h1>✅ Gmail OAuth2 Authorization Successful!</h1>
-          <p style="font-size: 16px;">Your Gmail API has been authorized successfully!</p>
-
-          ${tokens.refresh_token ? `
-            <div class="warning">
-              <strong>⚠️ CRITICAL - Save This Token Immediately!</strong>
-              <p style="margin-top: 10px; color: #78350f;">
-                Add this refresh token to your Render environment variables now.
-              </p>
-            </div>
-
-            <h2>🔑 Your Refresh Token</h2>
-            <div class="token-box" id="token">${tokens.refresh_token}</div>
-            <button class="copy-btn" onclick="copy()">📋 Copy Refresh Token</button>
-
-            <div class="steps">
-              <h3>🚀 Render Deployment Setup</h3>
-              <ol>
-                <li>
-                  <strong>Open Render Dashboard</strong>
-                  <br>Go to your service → <strong>Environment</strong> tab
-                </li>
-                <li>
-                  <strong>Add/Update these environment variables:</strong>
-                  <br><br>
-                  <code>GMAIL_CLIENT_ID</code>
-                  <small>Get from Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs</small>
-                  <br><br>
-                  <code>GMAIL_CLIENT_SECRET</code>
-                  <small>Get from the same location in Google Cloud Console</small>
-                  <br><br>
-                  <code>GMAIL_REFRESH_TOKEN</code>
-                  <small>Use the token displayed above (starts with <span class="credential-placeholder">${tokens.refresh_token.substring(0, 20)}...</span>)</small>
-                  <br><br>
-                  <code>GMAIL_USER_EMAIL</code>
-                  <small>Your authorized Gmail address</small>
-                  <br><br>
-                  <code>GMAIL_REDIRECT_URI</code>
-                  <small>${backendUrl}/auth/gmail/callback</small>
-                </li>
-                <li>
-                  <strong>Save Changes</strong>
-                  <br>Render will automatically redeploy (~2-3 minutes)
-                </li>
-                <li>
-                  <strong>Verify Setup</strong>
-                  <br>Visit: <code>${backendUrl}/auth/gmail/status</code>
-                </li>
-              </ol>
-            </div>
-
-            <div class="info-box">
-              <h3 style="margin-top: 0; color: #1e40af;">💻 Local Development (.env file)</h3>
-              <p style="color: #1e3a8a;">Add these variables to your <code>.env</code> file:</p>
-              <code style="display: block; margin: 5px 0;">GMAIL_CLIENT_ID=<span class="credential-placeholder">your_client_id_from_google_console</span></code>
-              <code style="display: block; margin: 5px 0;">GMAIL_CLIENT_SECRET=<span class="credential-placeholder">your_client_secret_from_google_console</span></code>
-              <code style="display: block; margin: 5px 0;">GMAIL_REFRESH_TOKEN=${tokens.refresh_token}</code>
-              <code style="display: block; margin: 5px 0;">GMAIL_USER_EMAIL=<span class="credential-placeholder">your-email@gmail.com</span></code>
-              <code style="display: block; margin: 5px 0;">GMAIL_REDIRECT_URI=http://localhost:5000/auth/gmail/callback</code>
-            </div>
-
-            <div class="warning" style="background: #fee2e2; border-color: #ef4444;">
-              <strong style="color: #991b1b;">🔒 Security Warning</strong>
-              <p style="color: #991b1b; margin-top: 10px;">
-                • Never commit this token to Git<br>
-                • Store only in environment variables<br>
-                • This token allows sending emails from your account<br>
-                • Keep it secret and secure
-              </p>
-            </div>
-          ` : `
-            <div class="warning">
-              <strong>ℹ️ No Refresh Token Received</strong>
-              <p style="margin-top: 10px; color: #78350f;">
-                This happens when you've already authorized this app.
-              </p>
-              <h3 style="color: #92400e; margin-top: 15px;">To get a new refresh token:</h3>
-              <ol style="margin: 10px 0; padding-left: 20px; color: #78350f;">
-                <li>Visit <a href="https://myaccount.google.com/permissions" target="_blank" style="color: #2563eb;">Google Account Permissions</a></li>
-                <li>Find "Equipment Health Monitor" and remove access</li>
-                <li><a href="/auth/gmail/authorize" style="color: #2563eb;">Authorize again</a></li>
-                <li>Click "Allow" on all permissions</li>
-              </ol>
-            </div>
-          `}
-
-          <p style="margin-top: 30px; text-align: center; color: #9ca3af; font-size: 14px;">
-            You can close this window after saving the token
-          </p>
-        </div>
-
-        <script>
-          function copy() {
-            const text = document.getElementById('token').textContent.trim();
-            navigator.clipboard.writeText(text).then(() => {
-              const btn = event.target;
-              btn.textContent = '✅ Copied to Clipboard!';
-              btn.style.background = '#10b981';
-              setTimeout(() => {
-                btn.textContent = '📋 Copy Refresh Token';
-                btn.style.background = '#3b82f6';
-              }, 3000);
-            }).catch(() => {
-              alert('Failed to copy. Please select and copy manually.');
-            });
-          }
-        </script>
+        <h1>✅ Gmail OAuth2 Success!</h1>
+        ${tokens.refresh_token ? `
+          <h2>Your Refresh Token:</h2>
+          <div class="token-box" id="token">${tokens.refresh_token}</div>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('token').textContent)">Copy Token</button>
+          <h3>Add to Render Environment:</h3>
+          <p><code>GMAIL_REFRESH_TOKEN=${tokens.refresh_token}</code></p>
+        ` : '<p>No refresh token received. Revoke access and try again.</p>'}
       </body>
       </html>
     `);
-    
   } catch (error) {
-    console.error('❌ Gmail callback error:', error);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Authorization Failed</title>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: Arial; padding: 40px; max-width: 700px; margin: 0 auto; background: #fee2e2; }
-          .error { background: white; padding: 30px; border-radius: 12px; border-left: 4px solid #ef4444; }
-          h1 { color: #dc2626; margin-top: 0; }
-          pre { background: #1f2937; color: #10b981; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
-          a { color: #2563eb; text-decoration: none; font-weight: 600; }
-          a:hover { text-decoration: underline; }
-        </style>
-      </head>
-      <body>
-        <div class="error">
-          <h1>❌ Authorization Failed</h1>
-          <p><strong>Error:</strong> ${error.message}</p>
-          ${process.env.NODE_ENV !== 'production' ? `<pre>${error.stack}</pre>` : ''}
-          <p style="margin-top: 25px;">
-            <a href="/auth/gmail/authorize">← Try Again</a>
-          </p>
-        </div>
-      </body>
-      </html>
-    `);
-  }
-});
-
-// Route 4: Send Test Email
-app.post('/auth/gmail/send-test', async (req, res) => {
-  console.log('✅ /auth/gmail/send-test route handler executed');
-  try {
-    const { email } = req.body;
-    
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email address is required'
-      });
-    }
-
-    console.log(`📧 Sending test email to: ${email}`);
-    const result = await gmailService.sendTestEmail(email);
-    
-    console.log(`✅ Test email sent successfully`);
-    res.json({
-      success: true,
-      message: 'Test email sent successfully',
-      messageId: result.messageId,
-      recipient: email,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('❌ Test email error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    console.error('❌ Callback error:', error);
+    res.status(500).send(`<h1>❌ Error: ${error.message}</h1>`);
   }
 });
 
 console.log('✅ Gmail OAuth2 routes registered\n');
 
-// ==================== MODELS ====================
-const EquipmentHistory = require('./models/EquipmentHistory');
-
-// ==================== MIDDLEWARE ====================
-const { protect } = require('./middleware/auth');
-const { validatePredictionInput } = require('./utils/validators');
-
-// ==================== CONTROLLERS ====================
-let mlPredictionController;
-let serviceLocatorController;
-
-try {
-  mlPredictionController = require('./controllers/mlPrediction');
-} catch (error) {
-  console.warn('⚠️  ML controller not found:', error.message);
-}
-
-try {
-  serviceLocatorController = require('./controllers/serviceLocator');
-} catch (error) {
-  console.warn('⚠️  Service locator not found:', error.message);
-}
-
 // ==================== PUBLIC ROUTES ====================
 
 app.get('/', (req, res) => {
-  const gmailStatus = gmailService.getStatus();
   res.json({
     message: '🤖 AI Equipment Health Monitor API',
     version: '2.0.0',
@@ -615,22 +213,23 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     database: global.dbConnected ? 'connected' : 'in-memory',
     email: {
-      configured: gmailStatus.initialized,
-      method: 'Gmail OAuth2'
+      configured: emailService.getStatus().anyAvailable,
+      providers: emailService.getStatus().providers
     },
     endpoints: {
       gmailStatus: '/auth/gmail/status',
       gmailAuth: '/auth/gmail/authorize',
+      emailStatus: '/api/email/status',
       auth: '/api/auth',
       predict: '/api/predict',
       history: '/api/history',
-      stats: '/api/stats'
+      stats: '/api/stats',
+      serviceLocator: '/api/service-locator'
     }
   });
 });
 
 app.get('/health', (req, res) => {
-  const gmailStatus = gmailService.getStatus();
   res.json({
     success: true,
     status: 'healthy',
@@ -638,7 +237,7 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
     database: global.dbConnected ? 'connected' : 'disconnected',
-    email: gmailStatus.initialized ? 'ready' : 'not-configured',
+    email: emailService.getStatus().anyAvailable ? 'ready' : 'not-configured',
     memory: {
       used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
@@ -646,9 +245,301 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Email service status
+app.get('/api/email/status', (req, res) => {
+  const status = emailService.getStatus();
+  res.json({
+    success: true,
+    status,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Email health check
+app.get('/api/email/health', async (req, res) => {
+  try {
+    const health = await emailService.healthCheck();
+    res.json({
+      success: health.healthy,
+      ...health,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ==================== AUTH ROUTES ====================
 const authRoutes = require('./routes/auth');
 app.use('/api/auth', authRoutes);
+
+// ==================== SERVICE LOCATOR ROUTES ====================
+
+console.log('🔧 Registering Service Locator routes...');
+
+// Service locator controller
+const axios = require('axios');
+
+// Search service providers
+app.get('/api/service-locator', async (req, res) => {
+  console.log('🔍 Service locator search requested');
+  console.log('   Query params:', req.query);
+  
+  try {
+    const { type, latitude, longitude, pincode, radius } = req.query;
+
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google Maps API not configured'
+      });
+    }
+
+    let searchLocation = { lat: null, lng: null };
+
+    // Get coordinates from pincode if provided
+    if (pincode) {
+      console.log(`📍 Geocoding pincode: ${pincode}`);
+      try {
+        const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${pincode}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+        const geocodeResponse = await axios.get(geocodeUrl);
+        
+        if (geocodeResponse.data.status === 'OK' && geocodeResponse.data.results.length > 0) {
+          searchLocation = geocodeResponse.data.results[0].geometry.location;
+          console.log(`✅ Geocoded: ${searchLocation.lat}, ${searchLocation.lng}`);
+        } else {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid pincode or location not found'
+          });
+        }
+      } catch (geocodeError) {
+        console.error('❌ Geocoding error:', geocodeError.message);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to geocode pincode'
+        });
+      }
+    } else if (latitude && longitude) {
+      searchLocation = { lat: parseFloat(latitude), lng: parseFloat(longitude) };
+      console.log(`📍 Using coordinates: ${searchLocation.lat}, ${searchLocation.lng}`);
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide either pincode or coordinates (latitude and longitude)'
+      });
+    }
+
+    // Determine search query based on equipment type
+    const equipmentTypeMap = {
+      laptop: 'laptop repair service',
+      desktop: 'computer repair service',
+      printer: 'printer repair service',
+      fan: 'fan repair service',
+      motor: 'motor repair service',
+      ac: 'AC repair service',
+      refrigerator: 'refrigerator repair service'
+    };
+
+    const searchQuery = equipmentTypeMap[type?.toLowerCase()] || 'electronics repair service';
+    const searchRadius = radius || 5000; // Default 5km
+
+    console.log(`🔍 Searching for: ${searchQuery} within ${searchRadius}m`);
+
+    // Google Places Nearby Search API
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation.lat},${searchLocation.lng}&radius=${searchRadius}&keyword=${encodeURIComponent(searchQuery)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    
+    const placesResponse = await axios.get(placesUrl);
+
+    if (placesResponse.data.status !== 'OK' && placesResponse.data.status !== 'ZERO_RESULTS') {
+      console.error('❌ Places API error:', placesResponse.data.status);
+      return res.status(500).json({
+        success: false,
+        error: 'Google Places API error: ' + placesResponse.data.status,
+        details: placesResponse.data.error_message
+      });
+    }
+
+    const providers = placesResponse.data.results.map(place => ({
+      id: place.place_id,
+      name: place.name,
+      address: place.vicinity,
+      location: {
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng
+      },
+      rating: place.rating || 0,
+      totalRatings: place.user_ratings_total || 0,
+      isOpen: place.opening_hours?.open_now,
+      types: place.types,
+      photos: place.photos?.map(photo => ({
+        reference: photo.photo_reference,
+        width: photo.width,
+        height: photo.height,
+        url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+      })) || [],
+      priceLevel: place.price_level,
+      businessStatus: place.business_status
+    }));
+
+    console.log(`✅ Found ${providers.length} service providers`);
+
+    res.json({
+      success: true,
+      count: providers.length,
+      providers,
+      searchLocation,
+      searchRadius,
+      equipmentType: type
+    });
+
+  } catch (error) {
+    console.error('❌ Service locator error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Service locator failed',
+      details: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+    });
+  }
+});
+
+// Get place details
+app.get('/api/service-locator/place/:placeId', async (req, res) => {
+  console.log('🔍 Place details requested:', req.params.placeId);
+  
+  try {
+    const { placeId } = req.params;
+
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google Maps API not configured'
+      });
+    }
+
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,reviews,photos,geometry,types,price_level,business_status&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    
+    const response = await axios.get(detailsUrl);
+
+    if (response.data.status !== 'OK') {
+      return res.status(404).json({
+        success: false,
+        error: 'Place not found'
+      });
+    }
+
+    const place = response.data.result;
+    
+    const details = {
+      id: placeId,
+      name: place.name,
+      address: place.formatted_address,
+      phone: place.formatted_phone_number,
+      website: place.website,
+      location: {
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng
+      },
+      rating: place.rating || 0,
+      totalRatings: place.user_ratings_total || 0,
+      openingHours: place.opening_hours,
+      reviews: place.reviews?.slice(0, 5).map(review => ({
+        author: review.author_name,
+        rating: review.rating,
+        text: review.text,
+        time: review.time,
+        profilePhoto: review.profile_photo_url
+      })) || [],
+      photos: place.photos?.map(photo => ({
+        reference: photo.photo_reference,
+        url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+      })) || [],
+      types: place.types,
+      priceLevel: place.price_level,
+      businessStatus: place.business_status
+    };
+
+    console.log(`✅ Place details retrieved: ${details.name}`);
+
+    res.json({
+      success: true,
+      details
+    });
+
+  } catch (error) {
+    console.error('❌ Place details error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Geocode address/pincode
+app.get('/api/service-locator/geocode', async (req, res) => {
+  console.log('🌍 Geocoding requested:', req.query.address);
+  
+  try {
+    const { address } = req.query;
+
+    if (!address) {
+      return res.status(400).json({
+        success: false,
+        error: 'Address or pincode is required'
+      });
+    }
+
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google Maps API not configured'
+      });
+    }
+
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    
+    const response = await axios.get(geocodeUrl);
+
+    if (response.data.status !== 'OK') {
+      return res.status(404).json({
+        success: false,
+        error: 'Location not found'
+      });
+    }
+
+    const result = response.data.results[0];
+    
+    const location = {
+      formattedAddress: result.formatted_address,
+      coordinates: {
+        lat: result.geometry.location.lat,
+        lng: result.geometry.location.lng
+      },
+      placeId: result.place_id,
+      types: result.types,
+      addressComponents: result.address_components
+    };
+
+    console.log(`✅ Geocoded: ${location.formattedAddress}`);
+
+    res.json({
+      success: true,
+      location
+    });
+
+  } catch (error) {
+    console.error('❌ Geocoding error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+console.log('✅ Service Locator routes registered\n');
 
 // ==================== PROTECTED ROUTES ====================
 
@@ -921,72 +812,6 @@ app.get('/api/stats', protect, async (req, res) => {
   }
 });
 
-// ==================== SERVICE LOCATOR ====================
-
-app.get('/api/service-providers', protect, async (req, res) => {
-  try {
-    if (!serviceLocatorController) {
-      return res.status(503).json({
-        success: false,
-        error: 'Service locator is not available'
-      });
-    }
-    
-    if (typeof serviceLocatorController.searchProviders === 'function') {
-      return await serviceLocatorController.searchProviders(req, res);
-    } else if (typeof serviceLocatorController === 'function') {
-      return serviceLocatorController(req, res);
-    }
-    
-    res.status(503).json({
-      success: false,
-      error: 'Service provider search method not available'
-    });
-  } catch (error) {
-    console.error('❌ Service provider error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/api/geocode', protect, async (req, res) => {
-  try {
-    if (!serviceLocatorController?.geocodeAddress) {
-      return res.status(503).json({
-        success: false,
-        error: 'Geocoding service is not available'
-      });
-    }
-    return await serviceLocatorController.geocodeAddress(req, res);
-  } catch (error) {
-    console.error('❌ Geocoding error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get('/api/place/:placeId', protect, async (req, res) => {
-  try {
-    if (!serviceLocatorController?.getPlaceDetails) {
-      return res.status(503).json({
-        success: false,
-        error: 'Place details service is not available'
-      });
-    }
-    return await serviceLocatorController.getPlaceDetails(req, res);
-  } catch (error) {
-    console.error('❌ Place details error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 // ==================== ERROR HANDLERS ====================
 
 app.use((req, res) => {
@@ -1011,131 +836,111 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ==================== INITIALIZATION ====================
-
 // ==================== EMAIL SERVICE INITIALIZATION ====================
+
 const initializeEmailService = async () => {
   try {
-    console.log('\n' + '━'.repeat(60));
-    console.log('📧 GMAIL OAUTH2 SERVICE INITIALIZATION');
-    console.log('━'.repeat(60));
+    console.log('\n' + '━'.repeat(70));
+    console.log('📧 MULTI-PROVIDER EMAIL SERVICE INITIALIZATION');
+    console.log('━'.repeat(70));
 
-    const status = gmailService.getStatus();
-    
-    console.log('Configuration Check:');
-    console.log(`   GMAIL_CLIENT_ID:     ${status.hasClientId ? '✅ Configured' : '❌ Missing'}`);
-    console.log(`   GMAIL_CLIENT_SECRET: ${status.hasClientSecret ? '✅ Configured' : '❌ Missing'}`);
-    console.log(`   GMAIL_REFRESH_TOKEN: ${status.hasRefreshToken ? '✅ Configured' : '❌ Missing'}`);
-    console.log(`   GMAIL_USER_EMAIL:    ${status.hasUserEmail ? '✅ Configured' : '❌ Missing'}`);
-    console.log(`   Redirect URI:        ${status.redirectUri}`);
-    
-    if (!status.hasClientId || !status.hasClientSecret) {
-      console.log('\n⚠️  Gmail OAuth credentials not configured in environment variables');
-      console.log('   Add GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET to enable email');
-      console.log('━'.repeat(60));
-      return false;
-    }
-    
-    if (!status.hasRefreshToken) {
-      const setupUrl = status.redirectUri.replace('/callback', '/authorize');
-      console.log('\n⚠️  Gmail refresh token not found');
-      console.log(`\n   Complete OAuth2 setup:`);
-      console.log(`   1. Visit: ${setupUrl}`);
-      console.log(`   2. Authorize with your Gmail account`);
-      console.log(`   3. Copy the refresh token`);
-      console.log(`   4. Add GMAIL_REFRESH_TOKEN to environment variables`);
-      console.log('━'.repeat(60));
-      return false;
+    let attempt = 0;
+    const maxAttempts = 5;
+    let initialized = false;
+
+    while (attempt < maxAttempts && !initialized) {
+      attempt++;
+      console.log(`\n🔄 Initialization attempt ${attempt}/${maxAttempts}...`);
+      
+      initialized = await emailService.initialize();
+      
+      if (initialized) {
+        console.log('\n✅ Email service initialization SUCCESS!');
+        break;
+      }
+      
+      if (attempt < maxAttempts) {
+        const waitTime = attempt * 3;
+        console.log(`⏳ Waiting ${waitTime} seconds before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+      }
     }
 
-    if (!status.hasUserEmail) {
-      console.log('\n⚠️  GMAIL_USER_EMAIL not configured');
-      console.log('   Add the authorized Gmail address to environment variables');
-      console.log('━'.repeat(60));
-      return false;
-    }
-
-    console.log('\n🔄 Initializing Gmail OAuth2 client...');
-    const initialized = await gmailService.initialize();
-    
     if (!initialized) {
-      console.log('❌ Gmail initialization failed');
-      console.log('━'.repeat(60));
+      console.error('\n❌ CRITICAL: Email service failed after', maxAttempts, 'attempts');
+      console.error('━'.repeat(70));
+      
+      if (process.env.NODE_ENV === 'production') {
+        console.error('🛑 Exiting due to missing email configuration...\n');
+        process.exit(1);
+      }
+      
       return false;
     }
 
-    console.log('✅ Gmail OAuth2 client initialized');
-    console.log('\n🔍 Verifying SMTP connection...');
+    console.log('\n🏥 Running email service health check...');
+    const healthCheck = await emailService.healthCheck();
     
-    const verified = await gmailService.verify();
-    
-    if (verified) {
-      console.log('✅ Gmail SMTP connection verified');
-      console.log(`✅ Email service ready: ${process.env.GMAIL_USER_EMAIL}`);
-      console.log('\n📬 Email notifications enabled for:');
-      console.log('   • User registration & verification');
-      console.log('   • Password reset requests');
-      console.log('   • Equipment health alerts');
-      console.log('   • Predictive maintenance warnings');
-      console.log('   • System notifications');
-      console.log('━'.repeat(60));
-      return true;
-    } else {
-      console.log('⚠️  SMTP verification failed but service is configured');
-      console.log('   Emails will be attempted when needed');
-      console.log('━'.repeat(60));
-      return true; // Return true to allow app to continue
+    if (healthCheck.healthy) {
+      console.log(`✅ Health check PASSED - Provider: ${healthCheck.provider}`);
     }
-    
+
+    const status = emailService.getStatus();
+    console.log('\n📊 Email Service Status:');
+    console.log(`   Primary: ${status.currentProvider || 'none'}`);
+    console.log(`   Gmail:    ${status.providers.gmail.initialized ? '✅' : '❌'}`);
+    console.log(`   SendGrid: ${status.providers.sendgrid.initialized ? '✅' : '❌'}`);
+    console.log(`   SMTP:     ${status.providers.smtp.initialized ? '✅' : '❌'}`);
+    console.log('━'.repeat(70));
+
+    return true;
+
   } catch (error) {
-    console.error('❌ Email service initialization error:', error.message);
-    if (process.env.NODE_ENV !== 'production') {
-      console.error('   Stack trace:', error.stack);
+    console.error('\n❌ Email error:', error.message);
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
     }
-    console.log('━'.repeat(60));
     return false;
   }
 };
+
+// ==================== SERVER STARTUP ====================
 
 const startServer = async () => {
   try {
     console.log('\n🚀 Starting Equipment Health Monitor Server...\n');
     
     await connectDB();
+    
     const emailReady = await initializeEmailService();
 
     app.listen(PORT, '0.0.0.0', () => {
       const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
       
-      console.log('═'.repeat(60));
+      console.log('═'.repeat(70));
       console.log('  🤖 AI EQUIPMENT HEALTH MONITOR');
-      console.log('═'.repeat(60));
+      console.log('═'.repeat(70));
       console.log(`📡 Port:       ${PORT}`);
       console.log(`🔗 Backend:    ${backendUrl}`);
-      console.log(`🌐 Frontend:   ${frontendUrl}`);
+      console.log(`🌐 Frontend:   ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
       console.log(`🗄️  Database:   ${global.dbConnected ? '✅ Connected' : '⚠️  Disconnected'}`);
-      console.log(`📧 Gmail:      ${emailReady ? '✅ Ready' : '⚠️  Not Configured'}`);
+      console.log(`📧 Email:      ${emailReady ? '✅ Ready' : '⚠️  Not Ready'}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log('═'.repeat(60));
-      console.log('📍 Gmail OAuth2 Routes:');
-      console.log('   GET  /auth/gmail/status       ✅');
-      console.log('   GET  /auth/gmail/authorize    ✅');
-      console.log('   GET  /auth/gmail/callback     ✅');
-      console.log('   POST /auth/gmail/send-test    ✅');
-      console.log('═'.repeat(60));
-      console.log('📍 API Routes:');
-      console.log('   GET  /                        - API Info');
-      console.log('   GET  /health                  - Health Check');
-      console.log('   POST /api/auth/*              - Authentication');
-      console.log('   POST /api/predict             - Equipment Analysis');
-      console.log('   GET  /api/history             - History');
-      console.log('   GET  /api/stats               - Statistics');
-      console.log('═'.repeat(60) + '\n');
-      
-      if (!emailReady) {
-        console.log(`📧 Gmail Setup: ${backendUrl}/auth/gmail/authorize\n`);
-      }
+      console.log('═'.repeat(70));
+      console.log('📍 Routes Registered:');
+      console.log('   GET  /                                - API Info');
+      console.log('   GET  /health                          - Health Check');
+      console.log('   GET  /auth/gmail/status               ✅');
+      console.log('   GET  /api/email/status                ✅');
+      console.log('   POST /api/auth/register               ✅');
+      console.log('   POST /api/auth/login                  ✅');
+      console.log('   POST /api/predict                     ✅');
+      console.log('   GET  /api/history                     ✅');
+      console.log('   GET  /api/stats                       ✅');
+      console.log('   GET  /api/service-locator             ✅');
+      console.log('   GET  /api/service-locator/place/:id   ✅');
+      console.log('   GET  /api/service-locator/geocode     ✅');
+      console.log('═'.repeat(70) + '\n');
     });
 
   } catch (error) {
