@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const axios = require('axios');
 const connectDB = require('./config/database');
 require('./config/passport');
+const logSanitizer = require('./utils/sanitizeLogs');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -82,7 +83,7 @@ try {
   gmailService = require('./config/gmail');
   console.log('✅ Gmail OAuth2 service loaded');
 } catch (error) {
-  console.warn('⚠️  Gmail OAuth2 service not found:', error.message);
+  logSanitizer.warn('⚠️  Gmail OAuth2 service not found:', error.message);
 }
 
 try {
@@ -90,7 +91,7 @@ try {
   basicEmailTransporter = createTransporter;
   console.log('✅ Basic email transporter loaded');
 } catch (error) {
-  console.warn('⚠️  Basic email service not found:', error.message);
+  logSanitizer.warn('⚠️  Basic email service not found:', error.message);
 }
 
 // ==================== EMAIL SERVICE WRAPPER ====================
@@ -213,7 +214,7 @@ let mlPredictionController;
 try {
   mlPredictionController = require('./controllers/mlPrediction');
 } catch (error) {
-  console.warn('⚠️  ML controller not found:', error.message);
+  logSanitizer.warn('⚠️  ML controller not found:', error.message);
 }
 
 // ==================== GMAIL OAUTH2 ROUTES ====================
