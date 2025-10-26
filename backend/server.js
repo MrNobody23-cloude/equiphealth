@@ -5,9 +5,9 @@ const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
 const cookieParser = require('cookie-parser');
+const axios = require('axios');
 const connectDB = require('./config/database');
 require('./config/passport');
-const emailService = require('./config/gmail');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -74,6 +74,132 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==================== LOAD EMAIL SERVICES ====================
+let gmailService;
+let basicEmailTransporter;
+
+try {
+  gmailService = require('./config/gmail');
+  console.log('✅ Gmail OAuth2 service loaded');
+} catch (error) {
+  console.warn('⚠️  Gmail OAuth2 service not found:', error.message);
+}
+
+try {
+  const { createTransporter } = require('./config/email');
+  basicEmailTransporter = createTransporter;
+  console.log('✅ Basic email transporter loaded');
+} catch (error) {
+  console.warn('⚠️  Basic email service not found:', error.message);
+}
+
+// ==================== EMAIL SERVICE WRAPPER ====================
+class EmailServiceWrapper {
+  constructor() {
+    this.gmailReady = false;
+    this.basicEmailReady = false;
+  }
+
+  async initialize() {
+    console.log('\n' + '━'.repeat(70));
+    console.log('📧 EMAIL SERVICE INITIALIZATION');
+    console.log('━'.repeat(70));
+
+    // Try Gmail OAuth2 first
+    if (gmailService) {
+      try {
+        console.log('\n🔄 Initializing Gmail OAuth2...');
+        this.gmailReady = await gmailService.initialize();
+        
+        if (this.gmailReady) {
+          console.log('✅ Gmail OAuth2 initialized');
+          const verified = await gmailService.verify();
+          if (verified) {
+            console.log('✅ Gmail OAuth2 verified and ready');
+            console.log('━'.repeat(70));
+            return true;
+          }
+        }
+      } catch (error) {
+        console.error('❌ Gmail OAuth2 failed:', error.message);
+      }
+    }
+
+    // Try basic SMTP as fallback
+    if (basicEmailTransporter) {
+      try {
+        console.log('\n🔄 Initializing basic SMTP...');
+        const { verifyTransporter } = require('./config/email');
+        this.basicEmailReady = await verifyTransporter();
+        
+        if (this.basicEmailReady) {
+          console.log('✅ Basic SMTP initialized');
+          console.log('━'.repeat(70));
+          return true;
+        }
+      } catch (error) {
+        console.error('❌ Basic SMTP failed:', error.message);
+      }
+    }
+
+    console.log('⚠️  No email service available - app will continue without email');
+    console.log('━'.repeat(70));
+    return false;
+  }
+
+  async sendEmail({ email, subject, html, text }) {
+    // Try Gmail OAuth2 first
+    if (this.gmailReady && gmailService) {
+      try {
+        console.log('📧 Sending via Gmail OAuth2...');
+        return await gmailService.sendEmail({ email, subject, html, text });
+      } catch (error) {
+        console.error('❌ Gmail OAuth2 failed:', error.message);
+        console.log('🔄 Falling back to basic SMTP...');
+      }
+    }
+
+    // Fallback to basic SMTP
+    if (this.basicEmailReady && basicEmailTransporter) {
+      try {
+        console.log('📧 Sending via basic SMTP...');
+        const transporter = basicEmailTransporter();
+        
+        if (!transporter) {
+          throw new Error('SMTP transporter not available');
+        }
+
+        const result = await transporter.sendMail({
+          from: `"Equipment Health Monitor" <${process.env.EMAIL_FROM || process.env.EMAIL_USERNAME}>`,
+          to: email,
+          subject: subject,
+          html: html,
+          text: text || html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+        });
+
+        console.log(`✅ Email sent via SMTP - ID: ${result.messageId}`);
+        return { success: true, messageId: result.messageId, provider: 'smtp' };
+
+      } catch (error) {
+        console.error('❌ Basic SMTP failed:', error.message);
+      }
+    }
+
+    throw new Error('No email service available');
+  }
+
+  getStatus() {
+    return {
+      gmailOAuth2: this.gmailReady ? '✅ Ready' : '❌ Not Available',
+      basicSMTP: this.basicEmailReady ? '✅ Ready' : '❌ Not Available',
+      anyAvailable: this.gmailReady || this.basicEmailReady,
+      primaryProvider: this.gmailReady ? 'Gmail OAuth2' : this.basicEmailReady ? 'Basic SMTP' : 'None'
+    };
+  }
+}
+
+const emailServiceWrapper = new EmailServiceWrapper();
+
 // ==================== MODELS ====================
 const EquipmentHistory = require('./models/EquipmentHistory');
 
@@ -83,6 +209,7 @@ const { validatePredictionInput } = require('./utils/validators');
 
 // ==================== CONTROLLERS ====================
 let mlPredictionController;
+
 try {
   mlPredictionController = require('./controllers/mlPrediction');
 } catch (error) {
@@ -93,11 +220,16 @@ try {
 
 console.log('\n🔧 Registering Gmail OAuth2 routes...');
 
-// Gmail Status
 app.get('/auth/gmail/status', (req, res) => {
-  console.log('✅ /auth/gmail/status route handler executed');
+  console.log('✅ Gmail status route');
   try {
-    const gmailService = require('./config/gmail');
+    if (!gmailService) {
+      return res.json({
+        success: false,
+        message: 'Gmail service not loaded'
+      });
+    }
+
     const status = gmailService.getStatus();
     const allConfigured = status.hasClientId && status.hasClientSecret && 
                          status.hasRefreshToken && status.hasUserEmail;
@@ -107,70 +239,48 @@ app.get('/auth/gmail/status', (req, res) => {
       configured: allConfigured,
       initialized: status.initialized,
       status: {
-        clientId: status.hasClientId ? '✅ Set' : '❌ Missing',
-        clientSecret: status.hasClientSecret ? '✅ Set' : '❌ Missing',
-        refreshToken: status.hasRefreshToken ? '✅ Set' : '❌ Missing',
-        userEmail: status.hasUserEmail ? `✅ ${process.env.GMAIL_USER_EMAIL}` : '❌ Missing',
-        method: status.method,
-        redirectUri: status.redirectUri
+        clientId: status.hasClientId ? '✅' : '❌',
+        clientSecret: status.hasClientSecret ? '✅' : '❌',
+        refreshToken: status.hasRefreshToken ? '✅' : '❌',
+        userEmail: status.hasUserEmail ? `✅ ${process.env.GMAIL_USER_EMAIL}` : '❌',
+        method: status.method
       },
-      message: allConfigured 
-        ? 'Gmail OAuth2 fully configured' 
-        : 'Gmail OAuth2 needs configuration',
       setupUrl: !status.hasRefreshToken
         ? `${req.protocol}://${req.get('host')}/auth/gmail/authorize`
         : null
     });
   } catch (error) {
-    console.error('❌ Status route error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Gmail Authorization
 app.get('/auth/gmail/authorize', (req, res) => {
-  console.log('✅ /auth/gmail/authorize route handler executed');
+  console.log('✅ Gmail authorize route');
   try {
-    const gmailService = require('./config/gmail');
+    if (!gmailService) {
+      return res.status(503).send('<h1>Gmail service not available</h1>');
+    }
     const authUrl = gmailService.getAuthUrl();
-    console.log('🔗 Redirecting to Google OAuth...');
     res.redirect(authUrl);
   } catch (error) {
-    console.error('❌ Authorization error:', error);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head><title>Authorization Error</title></head>
-      <body>
-        <h1>❌ Authorization Error</h1>
-        <p>${error.message}</p>
-        <a href="/">← Back to Home</a>
-      </body>
-      </html>
-    `);
+    res.status(500).send(`<h1>Error: ${error.message}</h1>`);
   }
 });
 
-// Gmail Callback
 app.get('/auth/gmail/callback', async (req, res) => {
-  console.log('✅ /auth/gmail/callback route handler executed');
+  console.log('✅ Gmail callback route');
   try {
-    const gmailService = require('./config/gmail');
     const { code, error } = req.query;
     
     if (error) {
-      return res.status(400).send(`<h1>❌ OAuth Error: ${error}</h1><a href="/auth/gmail/authorize">Try Again</a>`);
+      return res.send(`<h1>❌ OAuth Error: ${error}</h1>`);
     }
     
     if (!code) {
-      return res.status(400).send('<h1>❌ Missing authorization code</h1><a href="/auth/gmail/authorize">Try Again</a>');
+      return res.send('<h1>❌ Missing authorization code</h1>');
     }
     
     const tokens = await gmailService.getTokens(code);
-    const backendUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
     
     res.send(`
       <!DOCTYPE html>
@@ -179,29 +289,53 @@ app.get('/auth/gmail/callback', async (req, res) => {
         <title>Gmail OAuth2 Success</title>
         <style>
           body { font-family: Arial; max-width: 800px; margin: 40px auto; padding: 20px; }
-          .token-box { background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; margin: 20px 0; }
-          .copy-btn { background: #4285f4; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+          .token { background: #f0f0f0; padding: 15px; border-radius: 5px; word-break: break-all; font-family: monospace; }
+          button { background: #4285f4; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 10px; }
         </style>
       </head>
       <body>
-        <h1>✅ Gmail OAuth2 Success!</h1>
+        <h1>✅ Success!</h1>
         ${tokens.refresh_token ? `
           <h2>Your Refresh Token:</h2>
-          <div class="token-box" id="token">${tokens.refresh_token}</div>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('token').textContent)">Copy Token</button>
-          <h3>Add to Render Environment:</h3>
-          <p><code>GMAIL_REFRESH_TOKEN=${tokens.refresh_token}</code></p>
-        ` : '<p>No refresh token received. Revoke access and try again.</p>'}
+          <div class="token" id="token">${tokens.refresh_token}</div>
+          <button onclick="navigator.clipboard.writeText(document.getElementById('token').textContent).then(() => alert('Copied!'))">
+            Copy Token
+          </button>
+          <p>Add to Render Environment: <code>GMAIL_REFRESH_TOKEN=${tokens.refresh_token.substring(0, 30)}...</code></p>
+        ` : '<p>No refresh token. Revoke access and try again.</p>'}
       </body>
       </html>
     `);
   } catch (error) {
-    console.error('❌ Callback error:', error);
-    res.status(500).send(`<h1>❌ Error: ${error.message}</h1>`);
+    res.status(500).send(`<h1>Error: ${error.message}</h1>`);
   }
 });
 
-console.log('✅ Gmail OAuth2 routes registered\n');
+app.post('/auth/gmail/send-test', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email required' });
+    }
+
+    const result = await gmailService.sendTestEmail(email);
+    res.json({ success: true, messageId: result.messageId });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+console.log('✅ Gmail routes registered\n');
+
+// ==================== EMAIL SERVICE STATUS ====================
+
+app.get('/api/email/status', (req, res) => {
+  res.json({
+    success: true,
+    status: emailServiceWrapper.getStatus(),
+    timestamp: new Date().toISOString()
+  });
+});
 
 // ==================== PUBLIC ROUTES ====================
 
@@ -212,19 +346,15 @@ app.get('/', (req, res) => {
     status: 'running',
     timestamp: new Date().toISOString(),
     database: global.dbConnected ? 'connected' : 'in-memory',
-    email: {
-      configured: emailService.getStatus().anyAvailable,
-      providers: emailService.getStatus().providers
-    },
+    email: emailServiceWrapper.getStatus(),
     endpoints: {
-      gmailStatus: '/auth/gmail/status',
-      gmailAuth: '/auth/gmail/authorize',
-      emailStatus: '/api/email/status',
       auth: '/api/auth',
       predict: '/api/predict',
       history: '/api/history',
       stats: '/api/stats',
-      serviceLocator: '/api/service-locator'
+      serviceLocator: '/api/service-locator',
+      emailStatus: '/api/email/status',
+      gmailStatus: '/auth/gmail/status'
     }
   });
 });
@@ -237,39 +367,12 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
     database: global.dbConnected ? 'connected' : 'disconnected',
-    email: emailService.getStatus().anyAvailable ? 'ready' : 'not-configured',
+    email: emailServiceWrapper.getStatus().anyAvailable ? 'ready' : 'not-configured',
     memory: {
       used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
     }
   });
-});
-
-// Email service status
-app.get('/api/email/status', (req, res) => {
-  const status = emailService.getStatus();
-  res.json({
-    success: true,
-    status,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Email health check
-app.get('/api/email/health', async (req, res) => {
-  try {
-    const health = await emailService.healthCheck();
-    res.json({
-      success: health.healthy,
-      ...health,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
 });
 
 // ==================== AUTH ROUTES ====================
@@ -280,13 +383,8 @@ app.use('/api/auth', authRoutes);
 
 console.log('🔧 Registering Service Locator routes...');
 
-// Service locator controller
-const axios = require('axios');
-
-// Search service providers
 app.get('/api/service-locator', async (req, res) => {
-  console.log('🔍 Service locator search requested');
-  console.log('   Query params:', req.query);
+  console.log('🔍 Service locator:', req.query);
   
   try {
     const { type, latitude, longitude, pincode, radius } = req.query;
@@ -300,40 +398,23 @@ app.get('/api/service-locator', async (req, res) => {
 
     let searchLocation = { lat: null, lng: null };
 
-    // Get coordinates from pincode if provided
     if (pincode) {
-      console.log(`📍 Geocoding pincode: ${pincode}`);
-      try {
-        const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${pincode}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-        const geocodeResponse = await axios.get(geocodeUrl);
-        
-        if (geocodeResponse.data.status === 'OK' && geocodeResponse.data.results.length > 0) {
-          searchLocation = geocodeResponse.data.results[0].geometry.location;
-          console.log(`✅ Geocoded: ${searchLocation.lat}, ${searchLocation.lng}`);
-        } else {
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid pincode or location not found'
-          });
-        }
-      } catch (geocodeError) {
-        console.error('❌ Geocoding error:', geocodeError.message);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to geocode pincode'
-        });
+      console.log(`📍 Geocoding: ${pincode}`);
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${pincode}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+      const geocodeResponse = await axios.get(geocodeUrl);
+      
+      if (geocodeResponse.data.status === 'OK' && geocodeResponse.data.results.length > 0) {
+        searchLocation = geocodeResponse.data.results[0].geometry.location;
+        console.log(`✅ Location: ${searchLocation.lat}, ${searchLocation.lng}`);
+      } else {
+        return res.status(400).json({ success: false, error: 'Invalid pincode' });
       }
     } else if (latitude && longitude) {
       searchLocation = { lat: parseFloat(latitude), lng: parseFloat(longitude) };
-      console.log(`📍 Using coordinates: ${searchLocation.lat}, ${searchLocation.lng}`);
     } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Please provide either pincode or coordinates (latitude and longitude)'
-      });
+      return res.status(400).json({ success: false, error: 'Provide pincode or coordinates' });
     }
 
-    // Determine search query based on equipment type
     const equipmentTypeMap = {
       laptop: 'laptop repair service',
       desktop: 'computer repair service',
@@ -345,22 +426,14 @@ app.get('/api/service-locator', async (req, res) => {
     };
 
     const searchQuery = equipmentTypeMap[type?.toLowerCase()] || 'electronics repair service';
-    const searchRadius = radius || 5000; // Default 5km
+    const searchRadius = radius || 5000;
 
-    console.log(`🔍 Searching for: ${searchQuery} within ${searchRadius}m`);
-
-    // Google Places Nearby Search API
     const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation.lat},${searchLocation.lng}&radius=${searchRadius}&keyword=${encodeURIComponent(searchQuery)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
     
     const placesResponse = await axios.get(placesUrl);
 
     if (placesResponse.data.status !== 'OK' && placesResponse.data.status !== 'ZERO_RESULTS') {
-      console.error('❌ Places API error:', placesResponse.data.status);
-      return res.status(500).json({
-        success: false,
-        error: 'Google Places API error: ' + placesResponse.data.status,
-        details: placesResponse.data.error_message
-      });
+      return res.status(500).json({ success: false, error: 'Google Places API error' });
     }
 
     const providers = placesResponse.data.results.map(place => ({
@@ -376,16 +449,11 @@ app.get('/api/service-locator', async (req, res) => {
       isOpen: place.opening_hours?.open_now,
       types: place.types,
       photos: place.photos?.map(photo => ({
-        reference: photo.photo_reference,
-        width: photo.width,
-        height: photo.height,
         url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
-      })) || [],
-      priceLevel: place.price_level,
-      businessStatus: place.business_status
+      })) || []
     }));
 
-    console.log(`✅ Found ${providers.length} service providers`);
+    console.log(`✅ Found ${providers.length} providers`);
 
     res.json({
       success: true,
@@ -398,144 +466,49 @@ app.get('/api/service-locator', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Service locator error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Service locator failed',
-      details: process.env.NODE_ENV !== 'production' ? error.stack : undefined
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Get place details
 app.get('/api/service-locator/place/:placeId', async (req, res) => {
-  console.log('🔍 Place details requested:', req.params.placeId);
-  
   try {
     const { placeId } = req.params;
 
     if (!process.env.GOOGLE_MAPS_API_KEY) {
-      return res.status(503).json({
-        success: false,
-        error: 'Google Maps API not configured'
-      });
+      return res.status(503).json({ success: false, error: 'Google Maps API not configured' });
     }
 
-    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,reviews,photos,geometry,types,price_level,business_status&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,reviews,photos,geometry&key=${process.env.GOOGLE_MAPS_API_KEY}`;
     
     const response = await axios.get(detailsUrl);
 
     if (response.data.status !== 'OK') {
-      return res.status(404).json({
-        success: false,
-        error: 'Place not found'
-      });
+      return res.status(404).json({ success: false, error: 'Place not found' });
     }
 
     const place = response.data.result;
     
-    const details = {
-      id: placeId,
-      name: place.name,
-      address: place.formatted_address,
-      phone: place.formatted_phone_number,
-      website: place.website,
-      location: {
-        lat: place.geometry.location.lat,
-        lng: place.geometry.location.lng
-      },
-      rating: place.rating || 0,
-      totalRatings: place.user_ratings_total || 0,
-      openingHours: place.opening_hours,
-      reviews: place.reviews?.slice(0, 5).map(review => ({
-        author: review.author_name,
-        rating: review.rating,
-        text: review.text,
-        time: review.time,
-        profilePhoto: review.profile_photo_url
-      })) || [],
-      photos: place.photos?.map(photo => ({
-        reference: photo.photo_reference,
-        url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
-      })) || [],
-      types: place.types,
-      priceLevel: place.price_level,
-      businessStatus: place.business_status
-    };
-
-    console.log(`✅ Place details retrieved: ${details.name}`);
-
     res.json({
       success: true,
-      details
+      details: {
+        id: placeId,
+        name: place.name,
+        address: place.formatted_address,
+        phone: place.formatted_phone_number,
+        website: place.website,
+        location: place.geometry.location,
+        rating: place.rating || 0,
+        totalRatings: place.user_ratings_total || 0,
+        openingHours: place.opening_hours,
+        reviews: place.reviews?.slice(0, 5) || [],
+        photos: place.photos?.map(photo => ({
+          url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+        })) || []
+      }
     });
 
   } catch (error) {
-    console.error('❌ Place details error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Geocode address/pincode
-app.get('/api/service-locator/geocode', async (req, res) => {
-  console.log('🌍 Geocoding requested:', req.query.address);
-  
-  try {
-    const { address } = req.query;
-
-    if (!address) {
-      return res.status(400).json({
-        success: false,
-        error: 'Address or pincode is required'
-      });
-    }
-
-    if (!process.env.GOOGLE_MAPS_API_KEY) {
-      return res.status(503).json({
-        success: false,
-        error: 'Google Maps API not configured'
-      });
-    }
-
-    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-    
-    const response = await axios.get(geocodeUrl);
-
-    if (response.data.status !== 'OK') {
-      return res.status(404).json({
-        success: false,
-        error: 'Location not found'
-      });
-    }
-
-    const result = response.data.results[0];
-    
-    const location = {
-      formattedAddress: result.formatted_address,
-      coordinates: {
-        lat: result.geometry.location.lat,
-        lng: result.geometry.location.lng
-      },
-      placeId: result.place_id,
-      types: result.types,
-      addressComponents: result.address_components
-    };
-
-    console.log(`✅ Geocoded: ${location.formattedAddress}`);
-
-    res.json({
-      success: true,
-      location
-    });
-
-  } catch (error) {
-    console.error('❌ Geocoding error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -546,23 +519,17 @@ console.log('✅ Service Locator routes registered\n');
 app.post('/api/predict', protect, async (req, res) => {
   try {
     if (!mlPredictionController?.analyzeEquipment) {
-      return res.status(503).json({
-        success: false,
-        error: 'ML prediction service is not available'
-      });
+      return res.status(503).json({ success: false, error: 'ML service unavailable' });
     }
 
     const validation = validatePredictionInput(req.body);
     if (!validation.valid) {
-      return res.status(400).json({ 
-        success: false, 
-        error: validation.error 
-      });
+      return res.status(400).json({ success: false, error: validation.error });
     }
 
     console.log(`\n📊 Analyzing ${req.body.equipmentName || 'equipment'}...`);
     const prediction = await mlPredictionController.analyzeEquipment(req.body);
-    console.log(`✅ Analysis complete - Health: ${prediction.health_score}%`);
+    console.log(`✅ Health: ${prediction.health_score}%`);
 
     if (global.dbConnected) {
       try {
@@ -593,24 +560,17 @@ app.post('/api/predict', protect, async (req, res) => {
           timestamp: new Date()
         });
         await history.save();
-        console.log(`💾 Saved for: ${req.user.email}`);
+        console.log(`💾 Saved`);
       } catch (dbError) {
-        console.log('⚠️  DB save failed:', dbError.message);
+        console.log('⚠️  DB save failed');
       }
     }
 
-    res.json({ 
-      success: true, 
-      prediction,
-      timestamp: new Date().toISOString()
-    });
+    res.json({ success: true, prediction, timestamp: new Date().toISOString() });
 
   } catch (error) {
     console.error('❌ Prediction error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -623,120 +583,65 @@ app.get('/api/history', protect, async (req, res) => {
     if (req.query.riskLevel) query['prediction.risk_level'] = req.query.riskLevel;
 
     if (global.dbConnected) {
-      const history = await EquipmentHistory.find(query)
-        .sort({ timestamp: -1 })
-        .limit(limit);
-      res.json({ 
-        success: true, 
-        history, 
-        count: history.length 
-      });
+      const history = await EquipmentHistory.find(query).sort({ timestamp: -1 }).limit(limit);
+      res.json({ success: true, history, count: history.length });
     } else {
-      res.json({ 
-        success: true, 
-        history: [], 
-        count: 0, 
-        message: 'Database not connected' 
-      });
+      res.json({ success: true, history: [], count: 0 });
     }
   } catch (error) {
-    console.error('❌ History error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.get('/api/history/:id', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'Database not connected' 
-      });
+      return res.status(503).json({ success: false, error: 'DB not connected' });
     }
     
-    const history = await EquipmentHistory.findOne({
-      _id: req.params.id,
-      user: req.user._id
-    });
+    const history = await EquipmentHistory.findOne({ _id: req.params.id, user: req.user._id });
     
     if (!history) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'History entry not found or unauthorized' 
-      });
+      return res.status(404).json({ success: false, error: 'Not found' });
     }
     
     res.json({ success: true, history });
   } catch (error) {
-    console.error('❌ History fetch error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.delete('/api/history/:id', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'Database not connected' 
-      });
+      return res.status(503).json({ success: false, error: 'DB not connected' });
     }
     
-    const result = await EquipmentHistory.findOneAndDelete({
-      _id: req.params.id,
-      user: req.user._id
-    });
+    const result = await EquipmentHistory.findOneAndDelete({ _id: req.params.id, user: req.user._id });
     
     if (!result) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Entry not found or unauthorized' 
-      });
+      return res.status(404).json({ success: false, error: 'Not found' });
     }
     
-    console.log(`🗑️  Deleted entry: ${req.params.id}`);
-    res.json({ 
-      success: true, 
-      message: 'Entry deleted successfully' 
-    });
+    console.log(`🗑️  Deleted: ${req.params.id}`);
+    res.json({ success: true, message: 'Deleted' });
   } catch (error) {
-    console.error('❌ Delete error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.delete('/api/history', protect, async (req, res) => {
   try {
     if (!global.dbConnected) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'Database not connected' 
-      });
+      return res.status(503).json({ success: false, error: 'DB not connected' });
     }
     
     const result = await EquipmentHistory.deleteMany({ user: req.user._id });
-    console.log(`🗑️  Cleared ${result.deletedCount} entries for: ${req.user.email}`);
+    console.log(`🗑️  Cleared ${result.deletedCount} entries`);
     
-    res.json({ 
-      success: true, 
-      message: `Deleted ${result.deletedCount} entries`,
-      deletedCount: result.deletedCount
-    });
+    res.json({ success: true, message: `Deleted ${result.deletedCount}`, deletedCount: result.deletedCount });
   } catch (error) {
-    console.error('❌ Clear history error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -752,8 +657,7 @@ app.get('/api/stats', protect, async (req, res) => {
           average_health_score: 0,
           critical_count: 0,
           high_risk_count: 0
-        },
-        message: 'Database not connected'
+        }
       });
     }
 
@@ -796,19 +700,13 @@ app.get('/api/stats', protect, async (req, res) => {
           acc[item._id] = item.count;
           return acc;
         }, {}),
-        average_health_score: healthScores.length > 0 
-          ? Math.round(healthScores[0].avgHealth * 10) / 10 
-          : 0,
+        average_health_score: healthScores.length > 0 ? Math.round(healthScores[0].avgHealth * 10) / 10 : 0,
         critical_count: criticalEquipment,
         high_risk_count: highRiskEquipment
       }
     });
   } catch (error) {
-    console.error('❌ Stats error:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -820,8 +718,7 @@ app.use((req, res) => {
     success: false,
     error: 'Route not found',
     path: req.path,
-    method: req.method,
-    requestedUrl: req.originalUrl
+    method: req.method
   });
 });
 
@@ -829,90 +726,18 @@ app.use((err, req, res, next) => {
   console.error('❌ Server error:', err);
   res.status(err.statusCode || 500).json({
     success: false,
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+    error: process.env.NODE_ENV === 'production' ? 'Internal error' : err.message
   });
 });
-
-// ==================== EMAIL SERVICE INITIALIZATION ====================
-
-const initializeEmailService = async () => {
-  try {
-    console.log('\n' + '━'.repeat(70));
-    console.log('📧 MULTI-PROVIDER EMAIL SERVICE INITIALIZATION');
-    console.log('━'.repeat(70));
-
-    let attempt = 0;
-    const maxAttempts = 5;
-    let initialized = false;
-
-    while (attempt < maxAttempts && !initialized) {
-      attempt++;
-      console.log(`\n🔄 Initialization attempt ${attempt}/${maxAttempts}...`);
-      
-      initialized = await emailService.initialize();
-      
-      if (initialized) {
-        console.log('\n✅ Email service initialization SUCCESS!');
-        break;
-      }
-      
-      if (attempt < maxAttempts) {
-        const waitTime = attempt * 3;
-        console.log(`⏳ Waiting ${waitTime} seconds before retry...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
-      }
-    }
-
-    if (!initialized) {
-      console.error('\n❌ CRITICAL: Email service failed after', maxAttempts, 'attempts');
-      console.error('━'.repeat(70));
-      
-      if (process.env.NODE_ENV === 'production') {
-        console.error('🛑 Exiting due to missing email configuration...\n');
-        process.exit(1);
-      }
-      
-      return false;
-    }
-
-    console.log('\n🏥 Running email service health check...');
-    const healthCheck = await emailService.healthCheck();
-    
-    if (healthCheck.healthy) {
-      console.log(`✅ Health check PASSED - Provider: ${healthCheck.provider}`);
-    }
-
-    const status = emailService.getStatus();
-    console.log('\n📊 Email Service Status:');
-    console.log(`   Primary: ${status.currentProvider || 'none'}`);
-    console.log(`   Gmail:    ${status.providers.gmail.initialized ? '✅' : '❌'}`);
-    console.log(`   SendGrid: ${status.providers.sendgrid.initialized ? '✅' : '❌'}`);
-    console.log(`   SMTP:     ${status.providers.smtp.initialized ? '✅' : '❌'}`);
-    console.log('━'.repeat(70));
-
-    return true;
-
-  } catch (error) {
-    console.error('\n❌ Email error:', error.message);
-    if (process.env.NODE_ENV === 'production') {
-      process.exit(1);
-    }
-    return false;
-  }
-};
 
 // ==================== SERVER STARTUP ====================
 
 const startServer = async () => {
   try {
-    console.log('\n🚀 Starting Equipment Health Monitor Server...\n');
+    console.log('\n🚀 Starting Equipment Health Monitor...\n');
     
     await connectDB();
-    
-    const emailReady = await initializeEmailService();
+    const emailReady = await emailServiceWrapper.initialize();
 
     app.listen(PORT, '0.0.0.0', () => {
       const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
@@ -924,14 +749,16 @@ const startServer = async () => {
       console.log(`🔗 Backend:    ${backendUrl}`);
       console.log(`🌐 Frontend:   ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
       console.log(`🗄️  Database:   ${global.dbConnected ? '✅ Connected' : '⚠️  Disconnected'}`);
-      console.log(`📧 Email:      ${emailReady ? '✅ Ready' : '⚠️  Not Ready'}`);
+      console.log(`📧 Email:      ${emailReady ? '✅ Ready' : '⚠️  Not Configured'}`);
+      const emailStatus = emailServiceWrapper.getStatus();
+      console.log(`   Provider:   ${emailStatus.primaryProvider}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log('═'.repeat(70));
       console.log('📍 Routes Registered:');
-      console.log('   GET  /                                - API Info');
-      console.log('   GET  /health                          - Health Check');
-      console.log('   GET  /auth/gmail/status               ✅');
+      console.log('   GET  /                                ✅');
+      console.log('   GET  /health                          ✅');
       console.log('   GET  /api/email/status                ✅');
+      console.log('   GET  /auth/gmail/status               ✅');
       console.log('   POST /api/auth/register               ✅');
       console.log('   POST /api/auth/login                  ✅');
       console.log('   POST /api/predict                     ✅');
@@ -939,30 +766,29 @@ const startServer = async () => {
       console.log('   GET  /api/stats                       ✅');
       console.log('   GET  /api/service-locator             ✅');
       console.log('   GET  /api/service-locator/place/:id   ✅');
-      console.log('   GET  /api/service-locator/geocode     ✅');
       console.log('═'.repeat(70) + '\n');
     });
 
   } catch (error) {
-    console.error('❌ Server startup failed:', error);
+    console.error('❌ Startup failed:', error);
     process.exit(1);
   }
 };
 
-// ==================== SHUTDOWN ====================
+// ==================== GRACEFUL SHUTDOWN ====================
 
 process.on('SIGTERM', () => {
-  console.log('\nSIGTERM received, shutting down gracefully...');
+  console.log('\nSIGTERM - shutting down...');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('\nSIGINT received, shutting down gracefully...');
+  console.log('\nSIGINT - shutting down...');
   process.exit(0);
 });
 
 process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Promise Rejection:', err);
+  console.error('❌ Unhandled rejection:', err);
   if (process.env.NODE_ENV === 'production') {
     process.exit(1);
   }
