@@ -382,6 +382,8 @@ app.use('/api/auth', authRoutes);
 // ==================== SERVICE LOCATOR ROUTES ====================
 
 console.log('🔧 Registering Service Locator routes...');
+const serviceLocatorRoutes = require('./routes/serviceLocator');
+app.use('/api/service-locator', serviceLocatorRoutes);
 
 app.get('/api/service-locator', async (req, res) => {
   console.log('🔍 Service locator:', req.query);

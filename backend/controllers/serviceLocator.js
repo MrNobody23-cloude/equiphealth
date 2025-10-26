@@ -12,7 +12,7 @@ const geocodeLocation = async (address) => {
       }
     });
 
-    if (response.data.status === 'OK' && response.data.results.length > 0) {
+    if (response.data && response.data.status === 'OK' && response.data.results && response.data.results.length > 0) {
       const location = response.data.results[0].geometry.location;
       return {
         latitude: location.lat,
@@ -102,6 +102,10 @@ const getSearchKeywords = (equipmentType) => {
       'HVAC repair', 'air conditioning repair', 'heating repair', 'HVAC service',
       'AC repair', 'climate control repair', 'HVAC maintenance', 'AC service'
     ],
+    ac: [
+      'AC repair', 'air conditioner repair', 'AC service', 'air conditioning repair',
+      'AC maintenance', 'cooling system repair'
+    ],
     refrigerator: [
       'refrigerator repair', 'fridge repair', 'appliance repair', 'refrigerator service',
       'freezer repair', 'appliance service center'
@@ -162,7 +166,8 @@ const getSearchKeywords = (equipmentType) => {
     ]
   };
 
-  return keywordMaps[equipmentType] || keywordMaps.all;
+  const keywords = keywordMaps[equipmentType?.toLowerCase()] || keywordMaps.all;
+  return Array.isArray(keywords) ? keywords : keywordMaps.all;
 };
 
 // Perform nearby search
@@ -174,13 +179,15 @@ const performNearbySearch = async (lat, lng, keyword, radius, apiKey) => {
         radius: radius,
         keyword: keyword,
         key: apiKey
-      }
+      },
+      timeout: 10000 // 10 second timeout
     });
 
-    if (response.data.status === 'OK' || response.data.status === 'ZERO_RESULTS') {
-      return response.data.results || [];
+    if (response.data && (response.data.status === 'OK' || response.data.status === 'ZERO_RESULTS')) {
+      return Array.isArray(response.data.results) ? response.data.results : [];
     }
     
+    console.warn(`Nearby search returned status: ${response.data?.status || 'unknown'}`);
     return [];
   } catch (error) {
     console.error(`Nearby search error for "${keyword}":`, error.message);
@@ -197,13 +204,15 @@ const performTextSearch = async (lat, lng, query, radius, apiKey) => {
         location: `${lat},${lng}`,
         radius: radius,
         key: apiKey
-      }
+      },
+      timeout: 10000 // 10 second timeout
     });
 
-    if (response.data.status === 'OK' || response.data.status === 'ZERO_RESULTS') {
-      return response.data.results || [];
+    if (response.data && (response.data.status === 'OK' || response.data.status === 'ZERO_RESULTS')) {
+      return Array.isArray(response.data.results) ? response.data.results : [];
     }
     
+    console.warn(`Text search returned status: ${response.data?.status || 'unknown'}`);
     return [];
   } catch (error) {
     console.error(`Text search error for "${query}":`, error.message);
@@ -212,254 +221,35 @@ const performTextSearch = async (lat, lng, query, radius, apiKey) => {
 };
 
 // Format place data
-const formatPlace = (place, apiKey) => ({
-  id: place.place_id,
-  name: place.name,
-  address: place.vicinity || place.formatted_address || 'Address not available',
-  location: {
-    lat: place.geometry.location.lat,
-    lng: place.geometry.location.lng
-  },
-  rating: place.rating || null,
-  userRatingsTotal: place.user_ratings_total || 0,
-  types: place.types || [],
-  openNow: place.opening_hours?.open_now || null,
-  businessStatus: place.business_status,
-  photos: place.photos?.slice(0, 3).map(photo => ({
-    reference: photo.photo_reference,
-    url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photo.photo_reference}&key=${apiKey}`
-  })) || []
-});
+const formatPlace = (place, apiKey) => {
+  if (!place || !place.place_id) {
+    return null;
+  }
+
+  return {
+    id: place.place_id,
+    name: place.name || 'Unknown',
+    address: place.vicinity || place.formatted_address || 'Address not available',
+    location: {
+      lat: place.geometry?.location?.lat || 0,
+      lng: place.geometry?.location?.lng || 0
+    },
+    rating: place.rating || null,
+    userRatingsTotal: place.user_ratings_total || 0,
+    types: Array.isArray(place.types) ? place.types : [],
+    openNow: place.opening_hours?.open_now ?? null,
+    businessStatus: place.business_status || null,
+    photos: Array.isArray(place.photos) 
+      ? place.photos.slice(0, 3).map(photo => ({
+          reference: photo.photo_reference,
+          url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photo.photo_reference}&key=${apiKey}`
+        }))
+      : []
+  };
+};
 
 // Delay helper
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// @desc    Find nearby service centers with maximum coverage
-// @route   GET /api/service-locator
-// @access  Protected
-router.get('/', async (req, res) => {
-  try {
-    const { lat, lng, type, radius, address, pincode, city, landmark } = req.query;
-
-    console.log('🔍 Service Locator Request:', req.query);
-
-    let latitude, longitude, locationSource;
-
-    // Determine location based on input
-    if (lat && lng) {
-      latitude = parseFloat(lat);
-      longitude = parseFloat(lng);
-      locationSource = 'coordinates';
-      
-      if (isNaN(latitude) || isNaN(longitude)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid coordinates'
-        });
-      }
-    } else if (pincode) {
-      console.log('📮 Geocoding pincode:', pincode);
-      const geocoded = await geocodeLocation(pincode);
-      
-      if (!geocoded) {
-        return res.status(400).json({
-          success: false,
-          error: 'Could not find location for this pincode'
-        });
-      }
-      
-      latitude = geocoded.latitude;
-      longitude = geocoded.longitude;
-      locationSource = `pincode: ${pincode} (${geocoded.formattedAddress})`;
-    } else if (landmark) {
-      console.log('🏛️ Geocoding landmark:', landmark);
-      const geocoded = await geocodeLocation(landmark);
-      
-      if (!geocoded) {
-        return res.status(400).json({
-          success: false,
-          error: 'Could not find this landmark'
-        });
-      }
-      
-      latitude = geocoded.latitude;
-      longitude = geocoded.longitude;
-      locationSource = `landmark: ${landmark} (${geocoded.formattedAddress})`;
-    } else if (city) {
-      console.log('🏙️ Geocoding city:', city);
-      const geocoded = await geocodeLocation(city);
-      
-      if (!geocoded) {
-        return res.status(400).json({
-          success: false,
-          error: 'Could not find this city'
-        });
-      }
-      
-      latitude = geocoded.latitude;
-      longitude = geocoded.longitude;
-      locationSource = `city: ${city} (${geocoded.formattedAddress})`;
-    } else if (address) {
-      console.log('🏠 Geocoding address:', address);
-      const geocoded = await geocodeLocation(address);
-      
-      if (!geocoded) {
-        return res.status(400).json({
-          success: false,
-          error: 'Could not find this address'
-        });
-      }
-      
-      latitude = geocoded.latitude;
-      longitude = geocoded.longitude;
-      locationSource = `address: ${geocoded.formattedAddress}`;
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Please provide location (coordinates, pincode, city, landmark, or address)'
-      });
-    }
-
-    // Validate coordinates
-    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
-      return res.status(400).json({
-        success: false,
-        error: 'Coordinates out of range'
-      });
-    }
-
-    // Check API key
-    if (!process.env.GOOGLE_MAPS_API_KEY) {
-      console.error('❌ Google Maps API key not configured');
-      return res.status(503).json({
-        success: false,
-        error: 'Service locator is not configured'
-      });
-    }
-
-    const searchRadius = parseInt(radius) || 5000;
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-
-    console.log('📍 Location:', latitude, longitude);
-    console.log('📏 Search Radius:', searchRadius, 'meters');
-    console.log('⚙️ Equipment Type:', type);
-    console.log('🎯 Source:', locationSource);
-
-    // Get keywords for the equipment type
-    const keywords = getSearchKeywords(type);
-    console.log(`🔎 Using ${keywords.length} keywords for search`);
-
-    // Use Map to store unique places by place_id
-    const placesMap = new Map();
-
-    // Strategy 1: Multiple radius searches (graduated coverage)
-    const radii = [
-      searchRadius * 0.3,  // 30% of radius
-      searchRadius * 0.6,  // 60% of radius
-      searchRadius,        // Full radius
-      searchRadius * 1.5   // 150% of radius (extended)
-    ].map(r => Math.min(Math.round(r), 50000)); // Cap at 50km
-
-    console.log('📏 Search radii:', radii.map(r => `${(r/1000).toFixed(1)}km`).join(', '));
-
-    // Strategy 2: Use all keywords with nearby search
-    for (let i = 0; i < keywords.length; i++) {
-      const keyword = keywords[i];
-      
-      for (const radius of radii) {
-        try {
-          const results = await performNearbySearch(latitude, longitude, keyword, radius, apiKey);
-          
-          results.forEach(place => {
-            if (place.business_status !== 'CLOSED_PERMANENTLY' && !placesMap.has(place.place_id)) {
-              placesMap.set(place.place_id, formatPlace(place, apiKey));
-            }
-          });
-
-          // Small delay to avoid rate limiting
-          await delay(50);
-        } catch (error) {
-          console.error(`Error in nearby search for "${keyword}" at ${radius}m:`, error.message);
-        }
-      }
-
-      // Log progress
-      if ((i + 1) % 3 === 0 || i === keywords.length - 1) {
-        console.log(`✅ Processed ${i + 1}/${keywords.length} keywords, found ${placesMap.size} unique places`);
-      }
-    }
-
-    // Strategy 3: Text search for broader coverage (use top 5 keywords)
-    console.log('🔍 Performing text searches for broader coverage...');
-    const topKeywords = keywords.slice(0, 5);
-    
-    for (const keyword of topKeywords) {
-      for (const radius of radii.slice(1)) { // Skip smallest radius for text search
-        try {
-          const results = await performTextSearch(latitude, longitude, keyword, radius, apiKey);
-          
-          results.forEach(place => {
-            if (place.business_status !== 'CLOSED_PERMANENTLY' && !placesMap.has(place.place_id)) {
-              placesMap.set(place.place_id, formatPlace(place, apiKey));
-            }
-          });
-
-          await delay(100);
-        } catch (error) {
-          console.error(`Error in text search for "${keyword}":`, error.message);
-        }
-      }
-    }
-
-    console.log(`✅ Text search complete, total unique places: ${placesMap.size}`);
-
-    // Convert to array
-    let places = Array.from(placesMap.values());
-
-    // Calculate distance for each place
-    places = places.map(place => {
-      const distance = calculateDistance(
-        latitude,
-        longitude,
-        place.location.lat,
-        place.location.lng
-      );
-      return { ...place, distance };
-    });
-
-    // Sort by relevance (rating, reviews, distance)
-    places.sort((a, b) => {
-      // Calculate relevance score
-      const scoreA = calculateRelevanceScore(a);
-      const scoreB = calculateRelevanceScore(b);
-      return scoreB - scoreA;
-    });
-
-    console.log(`🎯 Final results: ${places.length} service centers found`);
-
-    res.status(200).json({
-      success: true,
-      count: places.length,
-      location: { latitude, longitude, source: locationSource },
-      searchParams: { 
-        radius: searchRadius, 
-        equipmentType: type,
-        keywordsUsed: keywords.length,
-        searchStrategies: ['nearby_search', 'text_search', 'multi_radius']
-      },
-      places: places.slice(0, 60) // Return top 60 results
-    });
-
-  } catch (error) {
-    console.error('❌ Service Locator Error:', error.message);
-    
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch service locations',
-      message: error.message
-    });
-  }
-});
 
 // Calculate distance between two coordinates (Haversine formula)
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -506,11 +296,367 @@ function calculateRelevanceScore(place) {
   }
 
   // Photos bonus (5 points)
-  if (place.photos && place.photos.length > 0) {
+  if (Array.isArray(place.photos) && place.photos.length > 0) {
     score += 5;
   }
 
   return score;
 }
+
+// @desc    Find nearby service centers with maximum coverage
+// @route   GET /api/service-locator
+// @access  Protected
+router.get('/', async (req, res) => {
+  try {
+    const { lat, lng, type, radius, address, pincode, city, landmark } = req.query;
+
+    console.log('🔍 Service Locator Request:', req.query);
+
+    let latitude, longitude, locationSource;
+
+    // Determine location based on input
+    if (lat && lng) {
+      latitude = parseFloat(lat);
+      longitude = parseFloat(lng);
+      locationSource = 'coordinates';
+      
+      if (isNaN(latitude) || isNaN(longitude)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid coordinates',
+          providers: [],
+          count: 0
+        });
+      }
+    } else if (pincode) {
+      console.log('📮 Geocoding pincode:', pincode);
+      const geocoded = await geocodeLocation(pincode);
+      
+      if (!geocoded) {
+        return res.status(400).json({
+          success: false,
+          error: 'Could not find location for this pincode',
+          providers: [],
+          count: 0
+        });
+      }
+      
+      latitude = geocoded.latitude;
+      longitude = geocoded.longitude;
+      locationSource = `pincode: ${pincode} (${geocoded.formattedAddress})`;
+    } else if (landmark) {
+      console.log('🏛️ Geocoding landmark:', landmark);
+      const geocoded = await geocodeLocation(landmark);
+      
+      if (!geocoded) {
+        return res.status(400).json({
+          success: false,
+          error: 'Could not find this landmark',
+          providers: [],
+          count: 0
+        });
+      }
+      
+      latitude = geocoded.latitude;
+      longitude = geocoded.longitude;
+      locationSource = `landmark: ${landmark} (${geocoded.formattedAddress})`;
+    } else if (city) {
+      console.log('🏙️ Geocoding city:', city);
+      const geocoded = await geocodeLocation(city);
+      
+      if (!geocoded) {
+        return res.status(400).json({
+          success: false,
+          error: 'Could not find this city',
+          providers: [],
+          count: 0
+        });
+      }
+      
+      latitude = geocoded.latitude;
+      longitude = geocoded.longitude;
+      locationSource = `city: ${city} (${geocoded.formattedAddress})`;
+    } else if (address) {
+      console.log('🏠 Geocoding address:', address);
+      const geocoded = await geocodeLocation(address);
+      
+      if (!geocoded) {
+        return res.status(400).json({
+          success: false,
+          error: 'Could not find this address',
+          providers: [],
+          count: 0
+        });
+      }
+      
+      latitude = geocoded.latitude;
+      longitude = geocoded.longitude;
+      locationSource = `address: ${geocoded.formattedAddress}`;
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide location (coordinates, pincode, city, landmark, or address)',
+        providers: [],
+        count: 0
+      });
+    }
+
+    // Validate coordinates
+    if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+      return res.status(400).json({
+        success: false,
+        error: 'Coordinates out of range',
+        providers: [],
+        count: 0
+      });
+    }
+
+    // Check API key
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      console.error('❌ Google Maps API key not configured');
+      return res.status(503).json({
+        success: false,
+        error: 'Service locator is not configured',
+        providers: [],
+        count: 0
+      });
+    }
+
+    const searchRadius = parseInt(radius) || 5000;
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+
+    console.log('📍 Location:', latitude, longitude);
+    console.log('📏 Search Radius:', searchRadius, 'meters');
+    console.log('⚙️ Equipment Type:', type);
+    console.log('🎯 Source:', locationSource);
+
+    // Get keywords for the equipment type
+    const keywords = getSearchKeywords(type);
+    console.log(`🔎 Using ${keywords.length} keywords for search`);
+
+    // Use Map to store unique places by place_id
+    const placesMap = new Map();
+
+    // Strategy 1: Multiple radius searches (graduated coverage)
+    const radii = [
+      searchRadius * 0.3,  // 30% of radius
+      searchRadius * 0.6,  // 60% of radius
+      searchRadius,        // Full radius
+      searchRadius * 1.5   // 150% of radius (extended)
+    ].map(r => Math.min(Math.round(r), 50000)); // Cap at 50km
+
+    console.log('📏 Search radii:', radii.map(r => `${(r/1000).toFixed(1)}km`).join(', '));
+
+    // Strategy 2: Use all keywords with nearby search
+    for (let i = 0; i < keywords.length; i++) {
+      const keyword = keywords[i];
+      
+      for (const radiusValue of radii) {
+        try {
+          const results = await performNearbySearch(latitude, longitude, keyword, radiusValue, apiKey);
+          
+          if (Array.isArray(results)) {
+            results.forEach(place => {
+              if (place && place.place_id && place.business_status !== 'CLOSED_PERMANENTLY' && !placesMap.has(place.place_id)) {
+                const formattedPlace = formatPlace(place, apiKey);
+                if (formattedPlace) {
+                  placesMap.set(place.place_id, formattedPlace);
+                }
+              }
+            });
+          }
+
+          // Small delay to avoid rate limiting
+          await delay(50);
+        } catch (error) {
+          console.error(`Error in nearby search for "${keyword}" at ${radiusValue}m:`, error.message);
+        }
+      }
+
+      // Log progress
+      if ((i + 1) % 3 === 0 || i === keywords.length - 1) {
+        console.log(`✅ Processed ${i + 1}/${keywords.length} keywords, found ${placesMap.size} unique places`);
+      }
+    }
+
+    // Strategy 3: Text search for broader coverage (use top 5 keywords)
+    console.log('🔍 Performing text searches for broader coverage...');
+    const topKeywords = keywords.slice(0, 5);
+    
+    for (const keyword of topKeywords) {
+      for (const radiusValue of radii.slice(1)) { // Skip smallest radius for text search
+        try {
+          const results = await performTextSearch(latitude, longitude, keyword, radiusValue, apiKey);
+          
+          if (Array.isArray(results)) {
+            results.forEach(place => {
+              if (place && place.place_id && place.business_status !== 'CLOSED_PERMANENTLY' && !placesMap.has(place.place_id)) {
+                const formattedPlace = formatPlace(place, apiKey);
+                if (formattedPlace) {
+                  placesMap.set(place.place_id, formattedPlace);
+                }
+              }
+            });
+          }
+
+          await delay(100);
+        } catch (error) {
+          console.error(`Error in text search for "${keyword}":`, error.message);
+        }
+      }
+    }
+
+    console.log(`✅ Text search complete, total unique places: ${placesMap.size}`);
+
+    // Convert to array - ensure it's always an array
+    let places = [];
+    try {
+      places = Array.from(placesMap.values());
+    } catch (error) {
+      console.error('Error converting places map to array:', error);
+      places = [];
+    }
+
+    // Ensure places is an array
+    if (!Array.isArray(places)) {
+      places = [];
+    }
+
+    // Calculate distance for each place
+    places = places.map(place => {
+      try {
+        const distance = calculateDistance(
+          latitude,
+          longitude,
+          place.location?.lat || 0,
+          place.location?.lng || 0
+        );
+        return { ...place, distance };
+      } catch (error) {
+        console.error('Error calculating distance:', error);
+        return { ...place, distance: 999 };
+      }
+    }).filter(place => place !== null && place !== undefined);
+
+    // Sort by relevance (rating, reviews, distance)
+    try {
+      places.sort((a, b) => {
+        const scoreA = calculateRelevanceScore(a);
+        const scoreB = calculateRelevanceScore(b);
+        return scoreB - scoreA;
+      });
+    } catch (error) {
+      console.error('Error sorting places:', error);
+    }
+
+    console.log(`🎯 Final results: ${places.length} service centers found`);
+
+    // Ensure we always return an array
+    const finalPlaces = Array.isArray(places) ? places.slice(0, 60) : [];
+
+    res.status(200).json({
+      success: true,
+      count: finalPlaces.length,
+      location: { 
+        latitude, 
+        longitude, 
+        source: locationSource 
+      },
+      searchParams: { 
+        radius: searchRadius, 
+        equipmentType: type || 'all',
+        keywordsUsed: keywords.length,
+        searchStrategies: ['nearby_search', 'text_search', 'multi_radius']
+      },
+      providers: finalPlaces, // Changed from 'places' to 'providers' to match frontend expectation
+      places: finalPlaces // Keep both for compatibility
+    });
+
+  } catch (error) {
+    console.error('❌ Service Locator Error:', error.message);
+    console.error(error.stack);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch service locations',
+      message: error.message,
+      providers: [], // Always return empty array on error
+      places: [],
+      count: 0
+    });
+  }
+});
+
+// @desc    Get detailed information about a specific place
+// @route   GET /api/service-locator/place/:placeId
+// @access  Public
+router.get('/place/:placeId', async (req, res) => {
+  try {
+    const { placeId } = req.params;
+
+    if (!placeId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Place ID is required'
+      });
+    }
+
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google Maps API not configured'
+      });
+    }
+
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json`;
+    
+    const response = await axios.get(detailsUrl, {
+      params: {
+        place_id: placeId,
+        fields: 'name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,reviews,photos,geometry',
+        key: process.env.GOOGLE_MAPS_API_KEY
+      },
+      timeout: 10000
+    });
+
+    if (!response.data || response.data.status !== 'OK') {
+      return res.status(404).json({
+        success: false,
+        error: 'Place not found'
+      });
+    }
+
+    const place = response.data.result;
+    
+    res.json({
+      success: true,
+      details: {
+        id: placeId,
+        name: place.name || 'Unknown',
+        address: place.formatted_address || 'Address not available',
+        phone: place.formatted_phone_number || null,
+        website: place.website || null,
+        location: place.geometry?.location || { lat: 0, lng: 0 },
+        rating: place.rating || 0,
+        totalRatings: place.user_ratings_total || 0,
+        openingHours: place.opening_hours || null,
+        reviews: Array.isArray(place.reviews) ? place.reviews.slice(0, 5) : [],
+        photos: Array.isArray(place.photos) 
+          ? place.photos.map(photo => ({
+              url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+            }))
+          : []
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Place Details Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch place details',
+      message: error.message
+    });
+  }
+});
 
 module.exports = router;
