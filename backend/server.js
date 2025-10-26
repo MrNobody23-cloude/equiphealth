@@ -7,7 +7,7 @@ const passport = require('passport');
 const cookieParser = require('cookie-parser');
 const connectDB = require('./config/database');
 require('./config/passport');
-const emailService = require('./config/email');
+const emailService = require('./config/gmail');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
