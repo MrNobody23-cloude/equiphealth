@@ -1,4 +1,3 @@
-// backend/routes/auth.js
 const express = require('express');
 const passport = require('passport');
 const router = express.Router();
@@ -6,7 +5,7 @@ const router = express.Router();
 const authController = require('../controllers/auth');
 const { protect } = require('../middleware/auth');
 
-// Local auth
+// Local
 router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.get('/verify-email/:token', authController.verifyEmail);
@@ -14,16 +13,14 @@ router.post('/resend-verification', authController.resendVerification);
 router.post('/forgot-password', authController.forgotPassword);
 router.put('/reset-password/:token', authController.resetPassword);
 
-// Google OAuth (server-side redirect flow)
+// Google OAuth
 router.get(
   '/google',
   (req, res, next) => {
-    // support passing a redirect path from frontend, optional
-    const state = req.query.state || '';
     passport.authenticate('google', {
       scope: ['openid', 'email', 'profile'],
       prompt: 'select_account',
-      state
+      state: req.query.state || ''
     })(req, res, next);
   }
 );
@@ -31,7 +28,6 @@ router.get(
 router.get(
   '/google/callback',
   passport.authenticate('google', { session: false, failureRedirect: '/api/auth/google/failure' }),
-  // IMPORTANT: use the redirecting handler instead of returning JSON
   authController.googleOAuthCallbackRedirect
 );
 
@@ -39,8 +35,29 @@ router.get('/google/failure', (req, res) => {
   res.status(401).json({ success: false, error: 'Google authentication failed' });
 });
 
-// Google ID Token sign-in (client-side flow)
+// Client-side Google token
 router.post('/google/token', authController.googleTokenSignIn);
+
+// GitHub OAuth
+router.get(
+  '/github',
+  (req, res, next) => {
+    passport.authenticate('github', {
+      scope: ['user:email'],
+      state: req.query.state || ''
+    })(req, res, next);
+  }
+);
+
+router.get(
+  '/github/callback',
+  passport.authenticate('github', { session: false, failureRedirect: '/api/auth/github/failure' }),
+  authController.githubOAuthCallbackRedirect
+);
+
+router.get('/github/failure', (req, res) => {
+  res.status(401).json({ success: false, error: 'GitHub authentication failed' });
+});
 
 // Private
 router.get('/me', protect, authController.getMe);

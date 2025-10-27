@@ -1,4 +1,3 @@
-// backend/controllers/auth.js
 const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
@@ -19,17 +18,11 @@ const getOAuthSuccessRedirect = () => process.env.OAUTH_SUCCESS_REDIRECT || '/da
 const useQueryToken = () => (process.env.OAUTH_TOKEN_IN_QUERY || 'false').toLowerCase() === 'true';
 
 function sanitizeRedirectPath(path) {
-  // Only allow local paths like "/dashboard" or "/welcome"
   if (typeof path !== 'string') return '';
-  try {
-    const trimmed = path.trim();
-    if (!trimmed.startsWith('/')) return '';
-    // Disallow protocol or slashes that could indicate external redirect
-    if (trimmed.startsWith('//') || trimmed.includes('://')) return '';
-    return trimmed;
-  } catch {
-    return '';
-  }
+  const trimmed = path.trim();
+  if (!trimmed.startsWith('/')) return '';
+  if (trimmed.startsWith('//') || trimmed.includes('://')) return '';
+  return trimmed;
 }
 
 function buildRedirectUrl(token, statePath) {
@@ -37,16 +30,25 @@ function buildRedirectUrl(token, statePath) {
   const defaultPath = getOAuthSuccessRedirect();
   const safePath = sanitizeRedirectPath(statePath) || defaultPath;
   if (useQueryToken()) {
-    // Put token in query: ?token=...
     return `${frontendUrl}${safePath}?token=${token}`;
   }
-  // Put token in hash: #token=...
   return `${frontendUrl}${safePath}#token=${token}`;
+}
+
+function setFrontTokenCookie(res, token) {
+  // Non-HTTP-only on purpose so SPA can read it if needed (quick handoff)
+  // If you want HTTP-only cookies, also update your frontend/protect middleware to use cookies.
+  res.cookie('token', token, {
+    httpOnly: false,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
 }
 
 // ==================== LOCAL AUTH (EMAIL/PASSWORD) ====================
 
-// Register (email verification required for local provider)
+// Register (email verification required)
 exports.register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -94,7 +96,7 @@ exports.register = async (req, res) => {
     });
 
     if (!emailResult.success) {
-      try { await User.findByIdAndDelete(user._id); } catch (e) {}
+      try { await User.findByIdAndDelete(user._id); } catch {}
       return res.status(503).json({
         success: false,
         error: 'Unable to send verification email at the moment. Please try again later.',
@@ -182,7 +184,6 @@ exports.login = async (req, res) => {
     }
 
     const token = user.getSignedJwtToken();
-
     return res.status(200).json({
       success: true,
       token,
@@ -204,7 +205,6 @@ exports.verifyEmail = async (req, res) => {
 
     await user.activateAccount();
 
-    // Fire-and-forget welcome email
     sendEmail({ email: user.email, subject: 'Welcome to Equipment Health Monitor!', html: getWelcomeEmailTemplate(user.name) }).catch(() => {});
 
     const token = user.getSignedJwtToken();
@@ -223,7 +223,7 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
-// Forgot password (local only)
+// Forgot password (local)
 exports.forgotPassword = async (req, res) => {
   try {
     const user = await User.findOne({ email: req.body.email.toLowerCase(), emailVerified: true });
@@ -253,7 +253,7 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// Reset password
+// Reset password (local)
 exports.resetPassword = async (req, res) => {
   try {
     const resetPasswordToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
@@ -327,21 +327,16 @@ exports.cleanupUnverifiedUsers = async (req, res) => {
 
 // ==================== GOOGLE AUTH ====================
 
-// Google OAuth server-side success handler (returns JSON)
+// JSON success (if you want API-style)
 exports.googleOAuthSuccess = async (req, res) => {
   try {
     const user = req.user;
     if (!user) return res.status(401).json({ success: false, error: 'Google authentication failed' });
 
-    if (typeof user.updateLastLogin === 'function') {
-      await user.updateLastLogin();
-    } else {
-      user.lastLogin = new Date();
-      await user.save({ validateBeforeSave: false });
-    }
+    if (typeof user.updateLastLogin === 'function') await user.updateLastLogin();
+    else { user.lastLogin = new Date(); await user.save({ validateBeforeSave: false }); }
 
     const token = user.getSignedJwtToken();
-
     return res.status(200).json({
       success: true,
       token,
@@ -349,39 +344,33 @@ exports.googleOAuthSuccess = async (req, res) => {
         id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, provider: 'google', emailVerified: true
       }
     });
-  } catch (error) {
+  } catch {
     return res.status(500).json({ success: false, error: 'Error finalizing Google sign-in' });
   }
 };
 
-// Google OAuth server-side success handler (redirects to frontend)
+// Redirect success (for browser flow)
 exports.googleOAuthCallbackRedirect = async (req, res) => {
   try {
     const user = req.user;
-    if (!user) {
-      return res.redirect(`${getFrontendUrl()}/login?error=google_auth_failed`);
-    }
+    if (!user) return res.redirect(`${getFrontendUrl()}/login?error=google_auth_failed`);
 
-    if (typeof user.updateLastLogin === 'function') {
-      await user.updateLastLogin();
-    } else {
-      user.lastLogin = new Date();
-      await user.save({ validateBeforeSave: false });
-    }
+    if (typeof user.updateLastLogin === 'function') await user.updateLastLogin();
+    else { user.lastLogin = new Date(); await user.save({ validateBeforeSave: false }); }
 
     const token = user.getSignedJwtToken();
 
-    // Google returns state in the callback query
-    const statePath = req.query.state || '';
-    const redirectUrl = buildRedirectUrl(token, statePath);
-
+    // Set cookie for instant availability; also put token in URL fragment or query
+    setFrontTokenCookie(res, token);
+    const redirectUrl = buildRedirectUrl(token, req.query.state || '');
     return res.redirect(redirectUrl);
-  } catch (error) {
+
+  } catch {
     return res.redirect(`${getFrontendUrl()}/login?error=${encodeURIComponent('google_signin_failed')}`);
   }
 };
 
-// Google ID Token sign-in (client-side flow)
+// Google ID token (client-side flow)
 exports.googleTokenSignIn = async (req, res) => {
   try {
     const { idToken } = req.body;
@@ -429,14 +418,11 @@ exports.googleTokenSignIn = async (req, res) => {
       await user.save({ validateBeforeSave: false });
     }
 
-    if (typeof user.updateLastLogin === 'function') {
-      await user.updateLastLogin();
-    } else {
-      user.lastLogin = new Date();
-      await user.save({ validateBeforeSave: false });
-    }
+    if (typeof user.updateLastLogin === 'function') await user.updateLastLogin();
+    else { user.lastLogin = new Date(); await user.save({ validateBeforeSave: false }); }
 
     const token = user.getSignedJwtToken();
+    setFrontTokenCookie(res, token);
 
     return res.status(200).json({
       success: true,
@@ -445,7 +431,51 @@ exports.googleTokenSignIn = async (req, res) => {
         id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, provider: 'google', emailVerified: true
       }
     });
-  } catch (error) {
+  } catch {
     return res.status(500).json({ success: false, error: 'Google token verification failed' });
+  }
+};
+
+// ==================== GITHUB AUTH ====================
+
+// JSON success (if needed)
+exports.githubOAuthSuccess = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ success: false, error: 'GitHub authentication failed' });
+
+    if (typeof user.updateLastLogin === 'function') await user.updateLastLogin();
+    else { user.lastLogin = new Date(); await user.save({ validateBeforeSave: false }); }
+
+    const token = user.getSignedJwtToken();
+    return res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: user._id, name: user.name, email: user.email, role: user.role, avatar: user.avatar, provider: 'github', emailVerified: true
+      }
+    });
+  } catch {
+    return res.status(500).json({ success: false, error: 'Error finalizing GitHub sign-in' });
+  }
+};
+
+// Redirect success
+exports.githubOAuthCallbackRedirect = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) return res.redirect(`${getFrontendUrl()}/login?error=github_auth_failed`);
+
+    if (typeof user.updateLastLogin === 'function') await user.updateLastLogin();
+    else { user.lastLogin = new Date(); await user.save({ validateBeforeSave: false }); }
+
+    const token = user.getSignedJwtToken();
+
+    setFrontTokenCookie(res, token);
+    const redirectUrl = buildRedirectUrl(token, req.query.state || '');
+    return res.redirect(redirectUrl);
+
+  } catch {
+    return res.redirect(`${getFrontendUrl()}/login?error=${encodeURIComponent('github_signin_failed')}`);
   }
 };
