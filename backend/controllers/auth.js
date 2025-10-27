@@ -1,11 +1,15 @@
-const crypto = require('crypto');
 const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
-const { 
-  getVerificationEmailTemplate, 
-  getWelcomeEmailTemplate,
-  getPasswordResetEmailTemplate 
-} = require('../utils/emailTemplates');
+const { getVerificationEmailTemplate, getPasswordResetEmailTemplate } = require('../utils/emailTemplates');
+
+// Generate JWT Token
+const generateToken = (userId) => {
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRE || '7d'
+  });
+};
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -14,108 +18,250 @@ exports.register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Validation
+    // Validate input
     if (!name || !email || !password) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide name, email and password'
+        error: 'Please provide name, email, and password'
       });
     }
 
     // Check if user exists
     const existingUser = await User.findOne({ email: email.toLowerCase() });
     if (existingUser) {
-      if (existingUser.emailVerified) {
-        return res.status(400).json({
-          success: false,
-          error: 'User already exists with this email'
-        });
-      } else {
-        // User registered but never verified - allow re-registration
-        console.log('⚠️  Deleting unverified user:', existingUser.email);
-        await User.findByIdAndDelete(existingUser._id);
-      }
-    }
-
-    // Check if email service is configured
-    const emailConfigured = !!(process.env.EMAIL_USERNAME && process.env.EMAIL_PASSWORD);
-
-    if (!emailConfigured) {
-      return res.status(503).json({
+      return res.status(400).json({
         success: false,
-        error: 'Email verification service is not configured. Please contact administrator.',
-        emailServiceDown: true
+        error: 'Email already registered'
       });
     }
 
-    // Create user with pending status
+    // Create user
     const user = await User.create({
       name,
       email: email.toLowerCase(),
-      password,
-      provider: 'local',
-      emailVerified: false,
-      accountStatus: 'pending'
+      password
     });
 
-    console.log('✅ User created (pending verification):', user.email);
+    console.log(`✅ User created: ${email}`);
 
     // Generate verification token
-    const verificationToken = user.getEmailVerificationToken();
-    await user.save();
+    const verificationToken = user.generateVerificationToken();
+    await user.save({ validateBeforeSave: false });
 
     // Create verification URL
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
-
-    console.log('🔗 Verification URL:', verificationUrl);
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
 
     // Send verification email
-    try {
-      const emailResult = await sendEmail({
-        email: user.email,
-        subject: 'Verify Your Email - Equipment Health Monitor',
-        html: getVerificationEmailTemplate(user.name, verificationUrl)
-      });
+    const emailHtml = getVerificationEmailTemplate(user.name, verificationUrl);
+    
+    const emailResult = await sendEmail({
+      email: user.email,
+      subject: '✅ Verify Your Email - Equipment Health Monitor',
+      html: emailHtml
+    });
 
-      if (emailResult.success) {
-        console.log('✅ Verification email sent successfully');
-        
-        res.status(201).json({
-          success: true,
-          message: 'Registration successful! Please check your email to verify your account before logging in.',
-          emailSent: true,
-          email: user.email
-        });
-      } else {
-        // Email failed - delete user from database
-        console.error('❌ Email sending failed, deleting user');
-        await User.findByIdAndDelete(user._id);
-        
-        throw new Error(emailResult.error || 'Failed to send verification email');
-      }
-    } catch (emailError) {
-      console.error('❌ Email error:', emailError);
+    // Check if email was sent successfully
+    if (!emailResult.success) {
+      console.warn(`⚠️  Verification email failed for ${email}: ${emailResult.error}`);
       
-      // Delete user if email fails
-      try {
-        await User.findByIdAndDelete(user._id);
-        console.log('🗑️  User deleted due to email failure');
-      } catch (deleteError) {
-        console.error('Error deleting user:', deleteError);
+      // Auto-verify user if email service is not configured
+      if (emailResult.error.includes('not configured') || emailResult.provider === 'none') {
+        console.log(`⚠️  Auto-verifying user ${email} (email service unavailable)`);
+        user.isVerified = true;
+        user.verificationToken = undefined;
+        user.verificationTokenExpire = undefined;
+        await user.save({ validateBeforeSave: false });
+        
+        // Generate token and send response
+        const token = generateToken(user._id);
+        
+        return res.status(201).json({
+          success: true,
+          message: 'Registration successful (email verification skipped - service unavailable)',
+          token,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            isVerified: user.isVerified,
+            role: user.role
+          },
+          warning: 'Email service not configured. You have been automatically verified.'
+        });
       }
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to send verification email. Please try again later or contact support.',
-        details: process.env.NODE_ENV === 'development' ? emailError.message : undefined
+      
+      // For other email errors, still create account but notify user
+      return res.status(201).json({
+        success: true,
+        message: 'Registration successful, but verification email failed to send',
+        warning: 'Please contact administrator to verify your account',
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          isVerified: false
+        }
       });
     }
 
+    console.log(`✅ Verification email sent to ${email}`);
+
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful. Please check your email to verify your account.',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isVerified: false
+      }
+    });
+
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('❌ Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Error in registration process'
+      error: error.message || 'Server error during registration'
+    });
+  }
+};
+
+// @desc    Login user
+// @route   POST /api/auth/login
+// @access  Public
+exports.login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide email and password'
+      });
+    }
+
+    // Find user and include password
+    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
+
+    // Check password
+    const isPasswordValid = await user.comparePassword(password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid credentials'
+      });
+    }
+
+    // Check if email is verified (skip if email service is not configured)
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        error: 'Please verify your email before logging in',
+        needsVerification: true
+      });
+    }
+
+    // Update last login
+    user.lastLogin = Date.now();
+    await user.save({ validateBeforeSave: false });
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    console.log(`✅ User logged in: ${email}`);
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isVerified: user.isVerified,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Login error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error during login'
+    });
+  }
+};
+
+// @desc    Verify email
+// @route   GET /api/auth/verify-email/:token
+// @access  Public
+exports.verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification token required'
+      });
+    }
+
+    // Hash token
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // Find user with valid token
+    const user = await User.findOne({
+      verificationToken: hashedToken,
+      verificationTokenExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired verification token'
+      });
+    }
+
+    // Verify user
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpire = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    console.log(`✅ Email verified: ${user.email}`);
+
+    // Generate token
+    const authToken = generateToken(user._id);
+
+    res.json({
+      success: true,
+      message: 'Email verified successfully',
+      token: authToken,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isVerified: user.isVerified,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Email verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error during email verification'
     });
   }
 };
@@ -130,269 +276,60 @@ exports.resendVerification = async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide email'
+        error: 'Email required'
       });
     }
 
-    const user = await User.findOne({ 
-      email: email.toLowerCase(),
-      emailVerified: false,
-      provider: 'local'
-    });
+    const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'No unverified account found with this email'
+        error: 'User not found'
       });
     }
 
-    // Check if user was created more than 24 hours ago
-    const hoursSinceCreation = (Date.now() - user.createdAt) / (1000 * 60 * 60);
-    if (hoursSinceCreation > 24) {
-      // Delete old unverified user
-      await User.findByIdAndDelete(user._id);
-      return res.status(410).json({
+    if (user.isVerified) {
+      return res.status(400).json({
         success: false,
-        error: 'Verification link expired. Please register again.',
-        expired: true
+        error: 'Email already verified'
       });
     }
 
     // Generate new verification token
-    const verificationToken = user.getEmailVerificationToken();
-    await user.save();
+    const verificationToken = user.generateVerificationToken();
+    await user.save({ validateBeforeSave: false });
 
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+    // Create verification URL
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
 
-    // Send email
+    // Send verification email
+    const emailHtml = getVerificationEmailTemplate(user.name, verificationUrl);
+    
     const emailResult = await sendEmail({
       email: user.email,
-      subject: 'Verify Your Email - Equipment Health Monitor',
-      html: getVerificationEmailTemplate(user.name, verificationUrl)
+      subject: '✅ Verify Your Email - Equipment Health Monitor',
+      html: emailHtml
     });
 
-    if (emailResult.success) {
-      res.status(200).json({
-        success: true,
-        message: 'Verification email sent! Please check your inbox.'
-      });
-    } else {
-      throw new Error(emailResult.error);
-    }
-
-  } catch (error) {
-    console.error('Resend verification error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to resend verification email'
-    });
-  }
-};
-
-// @desc    Login user
-// @route   POST /api/auth/login
-// @access  Public
-exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    // Validate
-    if (!email || !password) {
-      return res.status(400).json({
+    if (!emailResult.success) {
+      return res.status(503).json({
         success: false,
-        error: 'Please provide email and password'
+        error: 'Failed to send verification email',
+        details: emailResult.error
       });
     }
 
-    // Check for user
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials'
-      });
-    }
-
-    // Check if password matches
-    const isMatch = await user.matchPassword(password);
-
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid credentials'
-      });
-    }
-
-    // STRICT: Check if email is verified for local auth users
-    if (user.provider === 'local' && !user.emailVerified) {
-      return res.status(403).json({
-        success: false,
-        error: 'Please verify your email before logging in. Check your inbox for the verification link.',
-        emailNotVerified: true,
-        email: user.email
-      });
-    }
-
-    // Check if account is active
-    if (user.accountStatus !== 'active') {
-      return res.status(403).json({
-        success: false,
-        error: 'Your account is not active. Please contact support.',
-        accountInactive: true
-      });
-    }
-
-    if (!user.isActive) {
-      return res.status(403).json({
-        success: false,
-        error: 'Your account has been deactivated. Please contact support.',
-        accountDeactivated: true
-      });
-    }
-
-    // Update last login
-    await user.updateLastLogin();
-
-    // Create token
-    const token = user.getSignedJwtToken();
-
-    res.status(200).json({
+    res.json({
       success: true,
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        provider: user.provider,
-        emailVerified: user.emailVerified
-      }
-    });
-
-    console.log('✅ User logged in:', user.email);
-
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error in login process'
-    });
-  }
-};
-
-// @desc    Verify email
-// @route   GET /api/auth/verify-email/:token
-// @access  Public
-exports.verifyEmail = async (req, res) => {
-  try {
-    // Get hashed token
-    const emailVerificationToken = crypto
-      .createHash('sha256')
-      .update(req.params.token)
-      .digest('hex');
-
-    const user = await User.findOne({
-      emailVerificationToken,
-      emailVerificationExpire: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired verification token',
-        expired: true
-      });
-    }
-
-    console.log('✅ Verifying email for user:', user.email);
-
-    // Activate account
-    await user.activateAccount();
-
-    console.log('✅ Email verified and account activated:', user.email);
-
-    // Send welcome email (non-blocking)
-    sendEmail({
-      email: user.email,
-      subject: 'Welcome to Equipment Health Monitor!',
-      html: getWelcomeEmailTemplate(user.name)
-    }).then(() => {
-      console.log('✅ Welcome email sent to:', user.email);
-    }).catch(err => {
-      console.warn('⚠️  Welcome email failed (non-critical):', err.message);
-    });
-
-    // Create token
-    const token = user.getSignedJwtToken();
-
-    res.status(200).json({
-      success: true,
-      message: 'Email verified successfully! Your account is now active.',
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        emailVerified: user.emailVerified,
-        accountStatus: user.accountStatus
-      }
+      message: 'Verification email sent successfully'
     });
 
   } catch (error) {
-    console.error('Email verification error:', error);
+    console.error('❌ Resend verification error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error in email verification process'
-    });
-  }
-};
-
-// @desc    Logout user
-// @route   GET /api/auth/logout
-// @access  Private
-exports.logout = (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      console.error('Logout error:', err);
-    }
-  });
-  
-  res.status(200).json({
-    success: true,
-    message: 'Logged out successfully'
-  });
-};
-
-// @desc    Get current logged in user
-// @route   GET /api/auth/me
-// @access  Private
-exports.getMe = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-
-    res.status(200).json({
-      success: true,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-        provider: user.provider,
-        emailVerified: user.emailVerified,
-        accountStatus: user.accountStatus
-      }
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Error fetching user data'
+      error: 'Server error'
     });
   }
 };
@@ -402,70 +339,90 @@ exports.getMe = async (req, res) => {
 // @access  Public
 exports.forgotPassword = async (req, res) => {
   try {
-    const user = await User.findOne({ 
-      email: req.body.email.toLowerCase(),
-      emailVerified: true // Only allow verified users to reset password
-    });
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email required'
+      });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        error: 'No verified account found with that email'
+        error: 'User not found'
       });
     }
 
-    // Get reset token
-    const resetToken = user.getResetPasswordToken();
-    await user.save();
+    // Generate reset token
+    const resetToken = user.generatePasswordResetToken();
+    await user.save({ validateBeforeSave: false });
 
     // Create reset URL
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
 
-    try {
-      await sendEmail({
-        email: user.email,
-        subject: 'Password Reset Request',
-        html: getPasswordResetEmailTemplate(user.name, resetUrl)
-      });
+    // Send email
+    const emailHtml = getPasswordResetEmailTemplate(user.name, resetUrl);
+    
+    const emailResult = await sendEmail({
+      email: user.email,
+      subject: '🔒 Password Reset Request - Equipment Health Monitor',
+      html: emailHtml
+    });
 
-      res.status(200).json({
-        success: true,
-        message: 'Password reset email sent'
-      });
-    } catch (error) {
-      console.error('Reset email error:', error);
-      
+    if (!emailResult.success) {
       user.resetPasswordToken = undefined;
       user.resetPasswordExpire = undefined;
-      await user.save();
+      await user.save({ validateBeforeSave: false });
 
-      return res.status(500).json({
+      return res.status(503).json({
         success: false,
-        error: 'Email could not be sent'
+        error: 'Failed to send password reset email',
+        details: emailResult.error
       });
     }
+
+    res.json({
+      success: true,
+      message: 'Password reset email sent'
+    });
+
   } catch (error) {
-    console.error('Forgot password error:', error);
+    console.error('❌ Forgot password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Error in password reset process'
+      error: 'Server error'
     });
   }
 };
 
 // @desc    Reset password
-// @route   PUT /api/auth/reset-password/:token
+// @route   POST /api/auth/reset-password/:token
 // @access  Public
 exports.resetPassword = async (req, res) => {
   try {
-    // Get hashed token
-    const resetPasswordToken = crypto
+    const { token } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password required'
+      });
+    }
+
+    // Hash token
+    const hashedToken = crypto
       .createHash('sha256')
-      .update(req.params.token)
+      .update(token)
       .digest('hex');
 
+    // Find user with valid token
     const user = await User.findOne({
-      resetPasswordToken,
+      resetPasswordToken: hashedToken,
       resetPasswordExpire: { $gt: Date.now() }
     });
 
@@ -477,54 +434,64 @@ exports.resetPassword = async (req, res) => {
     }
 
     // Set new password
-    user.password = req.body.password;
+    user.password = password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
 
-    // Create token
-    const token = user.getSignedJwtToken();
+    console.log(`✅ Password reset: ${user.email}`);
 
-    res.status(200).json({
+    // Generate token
+    const authToken = generateToken(user._id);
+
+    res.json({
       success: true,
-      token,
-      message: 'Password reset successful'
+      message: 'Password reset successfully',
+      token: authToken
     });
 
   } catch (error) {
-    console.error('Reset password error:', error);
+    console.error('❌ Reset password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Error in password reset process'
+      error: 'Server error'
     });
   }
 };
 
-// @desc    Cleanup unverified users (older than 24 hours)
-// @route   DELETE /api/auth/cleanup-unverified (internal use)
-// @access  Private/Admin
-exports.cleanupUnverifiedUsers = async (req, res) => {
+// @desc    Get current user
+// @route   GET /api/auth/me
+// @access  Private
+exports.getMe = async (req, res) => {
   try {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const user = await User.findById(req.user._id);
 
-    const result = await User.deleteMany({
-      emailVerified: false,
-      provider: 'local',
-      createdAt: { $lt: oneDayAgo }
-    });
-
-    console.log(`🧹 Cleaned up ${result.deletedCount} unverified users`);
-
-    res.status(200).json({
+    res.json({
       success: true,
-      message: `Deleted ${result.deletedCount} unverified users`,
-      count: result.deletedCount
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isVerified: user.isVerified,
+        role: user.role,
+        createdAt: user.createdAt
+      }
     });
   } catch (error) {
-    console.error('Cleanup error:', error);
+    console.error('❌ Get user error:', error);
     res.status(500).json({
       success: false,
-      error: 'Error cleaning up unverified users'
+      error: 'Server error'
     });
   }
+};
+
+// @desc    Logout user
+// @route   POST /api/auth/logout
+// @access  Private
+exports.logout = async (req, res) => {
+  res.json({
+    success: true,
+    message: 'Logged out successfully'
+  });
 };
