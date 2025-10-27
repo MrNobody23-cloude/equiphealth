@@ -11,20 +11,7 @@ import ServiceLocator from './components/ServiceLocator';
 import api from './services/api';
 import './App.css';
 
-// Attach token to axios default header immediately
-function setAxiosAuthHeader(token) {
-  try {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    } else {
-      delete api.defaults.headers.common['Authorization'];
-    }
-  } catch (e) {
-    // ignore
-  }
-}
-
-// 1) Capture token before routes render so PrivateRoute doesn't bounce
+// Capture token BEFORE rendering AuthProvider/Routes
 function TokenBootstrap({ onReady }) {
   const location = useLocation();
 
@@ -33,7 +20,7 @@ function TokenBootstrap({ onReady }) {
       const url = new URL(window.location.href);
       let token = null;
 
-      // Prefer query (?token=...)
+      // Query
       const qp = url.searchParams;
       if (qp.has('token')) {
         token = qp.get('token');
@@ -42,7 +29,7 @@ function TokenBootstrap({ onReady }) {
         window.history.replaceState(null, '', clean);
       }
 
-      // Fallback: hash (#token=...)
+      // Hash
       if (!token && url.hash && url.hash.startsWith('#')) {
         const hp = new URLSearchParams(url.hash.substring(1));
         token = hp.get('token');
@@ -51,17 +38,16 @@ function TokenBootstrap({ onReady }) {
 
       if (token) {
         localStorage.setItem('token', token);
-        setAxiosAuthHeader(token);
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       } else {
-        // ensure axios header reflects current storage (maybe was set before)
         const existing = localStorage.getItem('token');
-        setAxiosAuthHeader(existing);
+        if (existing) {
+          api.defaults.headers.common['Authorization'] = `Bearer ${existing}`;
+        }
       }
-    } catch (e) {
-      // noop
-    } finally {
-      onReady(true);
-    }
+    } catch {}
+
+    onReady(true);
   }, [onReady]);
 
   useEffect(() => {
@@ -72,11 +58,11 @@ function TokenBootstrap({ onReady }) {
   return null;
 }
 
-// 2) OAuth callback page (public) - also stores token and navigates to /dashboard
+// OAuth callback (public)
 function OAuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { setUser } = useAuth();
+  const { applyToken } = useAuth();
   const [status, setStatus] = useState('processing');
 
   useEffect(() => {
@@ -84,7 +70,7 @@ function OAuthCallback() {
       let token = searchParams.get('token');
       const error = searchParams.get('error');
 
-      if (!token && window.location.hash && window.location.hash.startsWith('#')) {
+      if (!token && window.location.hash?.startsWith('#')) {
         const hp = new URLSearchParams(window.location.hash.substring(1));
         token = hp.get('token');
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -92,37 +78,24 @@ function OAuthCallback() {
 
       if (error) {
         setStatus('error');
-        return setTimeout(() => navigate('/login?error=oauth_failed', { replace: true }), 1000);
+        return setTimeout(() => navigate('/login?error=oauth_failed', { replace: true }), 800);
       }
 
-      if (!token) {
-        return navigate('/login', { replace: true });
-      }
+      if (!token) return navigate('/login', { replace: true });
 
       try {
-        localStorage.setItem('token', token);
-        setAxiosAuthHeader(token);
-
-        // Try to fetch user (optional)
-        try {
-          const res = await api.get('/auth/me');
-          if (res.data?.success) setUser(res.data.user);
-        } catch (e) {
-          // ignore; AuthContext can hydrate later
-        }
-
+        await applyToken(token);
         setStatus('success');
-        setTimeout(() => navigate('/dashboard', { replace: true }), 400);
-      } catch (e) {
+        setTimeout(() => navigate('/dashboard', { replace: true }), 300);
+      } catch {
         localStorage.removeItem('token');
-        setAxiosAuthHeader(null);
         setStatus('error');
-        setTimeout(() => navigate('/login?error=session_failed', { replace: true }), 1000);
+        setTimeout(() => navigate('/login?error=session_failed', { replace: true }), 800);
       }
     };
 
     handle();
-  }, [searchParams, navigate, setUser]);
+  }, [searchParams, navigate, applyToken]);
 
   return (
     <div className="oauth-callback-container">
@@ -131,7 +104,6 @@ function OAuthCallback() {
           <>
             <div className="loading-spinner-large"></div>
             <h2>Processing Authentication...</h2>
-            <p>Please wait while we sign you in</p>
           </>
         )}
         {status === 'success' && (
@@ -153,13 +125,14 @@ function OAuthCallback() {
   );
 }
 
-// 3) Main app content (protected)
+// Main app
 function MainApp() {
   const [activeTab, setActiveTab] = useState('monitor');
   const [equipmentList, setEquipmentList] = useState([]);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [prefillData, setPrefillData] = useState(null);
   const [loading, setLoading] = useState(true);
+
   const { user, logout } = useAuth();
 
   useEffect(() => {
@@ -171,11 +144,8 @@ function MainApp() {
     setLoading(true);
     try {
       const response = await api.get('/history');
-      if (response.data.success) {
-        setEquipmentList(response.data.history || []);
-      } else {
-        setEquipmentList([]);
-      }
+      if (response.data.success) setEquipmentList(response.data.history || []);
+      else setEquipmentList([]);
     } catch (error) {
       console.error('Error fetching equipment list:', error);
       setEquipmentList([]);
@@ -187,7 +157,7 @@ function MainApp() {
   const handleAddReadings = (equipment) => {
     setPrefillData({
       equipmentName: equipment.equipmentName,
-      equipmentType: equipment.equipmentType
+      equipmentType: equipment.equipmentType,
     });
     setActiveTab('monitor');
   };
@@ -211,43 +181,27 @@ function MainApp() {
               {user.avatar ? (
                 <img src={user.avatar} alt={user.name} className="user-avatar" />
               ) : (
-                <div className="user-avatar-placeholder">
-                  {user.name?.charAt(0).toUpperCase() || 'U'}
-                </div>
+                <div className="user-avatar-placeholder">{user.name?.charAt(0).toUpperCase() || 'U'}</div>
               )}
               <div className="user-details">
                 <div className="user-name">{user.name}</div>
                 <div className="user-email">{user.email}</div>
               </div>
             </div>
-            <button onClick={handleLogout} className="logout-btn">
-              🚪 Logout
-            </button>
+            <button onClick={handleLogout} className="logout-btn">🚪 Logout</button>
           </div>
         )}
       </header>
 
       <nav className="app-nav">
-        <button
-          className={`nav-btn ${activeTab === 'monitor' ? 'active' : ''}`}
-          onClick={() => setActiveTab('monitor')}
-        >
-          <span className="nav-icon">📊</span>
-          <span className="nav-text">Monitor Equipment</span>
+        <button className={`nav-btn ${activeTab === 'monitor' ? 'active' : ''}`} onClick={() => setActiveTab('monitor')}>
+          <span className="nav-icon">📊</span><span className="nav-text">Monitor Equipment</span>
         </button>
-        <button
-          className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setActiveTab('dashboard')}
-        >
-          <span className="nav-icon">📈</span>
-          <span className="nav-text">Dashboard</span>
+        <button className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+          <span className="nav-icon">📈</span><span className="nav-text">Dashboard</span>
         </button>
-        <button
-          className={`nav-btn ${activeTab === 'services' ? 'active' : ''}`}
-          onClick={() => setActiveTab('services')}
-        >
-          <span className="nav-icon">🔧</span>
-          <span className="nav-text">Service Locator</span>
+        <button className={`nav-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => setActiveTab('services')}>
+          <span className="nav-icon">🔧</span><span className="nav-text">Service Locator</span>
         </button>
       </nav>
 
@@ -277,9 +231,7 @@ function MainApp() {
                 onAddReadings={handleAddReadings}
               />
             )}
-            {activeTab === 'services' && (
-              <ServiceLocator equipmentList={equipmentList} />
-            )}
+            {activeTab === 'services' && <ServiceLocator equipmentList={equipmentList} />}
           </>
         )}
       </main>
@@ -287,40 +239,37 @@ function MainApp() {
       <footer className="app-footer">
         <p>
           Powered by AI-Driven Predictive Analytics |
-          <span className="footer-stats">
-            {equipmentList.length > 0 && ` ${equipmentList.length} Total Records`}
-          </span>
+          <span className="footer-stats">{equipmentList.length > 0 && ` ${equipmentList.length} Total Records`}</span>
         </p>
       </footer>
     </div>
   );
 }
 
-// 4) Root App with Routing
 function App() {
   const [bootReady, setBootReady] = useState(false);
 
   return (
     <BrowserRouter>
-      <AuthProvider>
-        {!bootReady ? (
-          <>
-            <TokenBootstrap onReady={setBootReady} />
-            <div className="oauth-callback-container">
-              <div className="oauth-callback-card">
-                <div className="loading-spinner-large"></div>
-                <h2>Loading...</h2>
-              </div>
+      {!bootReady ? (
+        <>
+          <TokenBootstrap onReady={setBootReady} />
+          <div className="oauth-callback-container">
+            <div className="oauth-callback-card">
+              <div className="loading-spinner-large"></div>
+              <h2>Loading...</h2>
             </div>
-          </>
-        ) : (
+          </div>
+        </>
+      ) : (
+        <AuthProvider>
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/verify-email/:token" element={<VerifyEmail />} />
 
-            {/* OAuth callback (public) */}
+            {/* OAuth callback */}
             <Route path="/auth/callback" element={<OAuthCallback />} />
 
             {/* Protected */}
@@ -362,8 +311,8 @@ function App() {
             {/* Catch-all */}
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
-        )}
-      </AuthProvider>
+        </AuthProvider>
+      )}
     </BrowserRouter>
   );
 }

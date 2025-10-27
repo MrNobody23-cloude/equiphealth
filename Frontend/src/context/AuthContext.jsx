@@ -9,7 +9,7 @@ export const useAuth = () => {
   return ctx;
 };
 
-// Helper to keep axios in sync
+// Attach/remove token on axios
 function setAxiosAuthHeader(token) {
   try {
     if (token) {
@@ -25,54 +25,48 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [initialized, setInitialized] = useState(false);
 
-  // Hydrate auth from localStorage on first load
+  // Keep axios header in sync with token
+  useEffect(() => {
+    setAxiosAuthHeader(token);
+  }, [token]);
+
+  // Hydrate on first load
   useEffect(() => {
     const boot = async () => {
       const stored = localStorage.getItem('token');
       if (!stored) {
-        setAxiosAuthHeader(null);
         setInitialized(true);
         return;
       }
 
-      // Set token and axios header, then fetch profile (non-blocking for routing)
       setToken(stored);
-      setAxiosAuthHeader(stored);
-
       try {
         const res = await api.get('/auth/me');
         if (res.data?.success) {
           setUser(res.data.user);
         } else {
-          // Invalid token
           localStorage.removeItem('token');
           setToken(null);
-          setAxiosAuthHeader(null);
         }
       } catch {
         localStorage.removeItem('token');
         setToken(null);
-        setAxiosAuthHeader(null);
       } finally {
-        // Allow routes to render after initial attempt
         setInitialized(true);
       }
     };
     boot();
   }, []);
 
-  // Public method to force re-check (optional)
   const checkAuth = async () => {
     const stored = localStorage.getItem('token');
     if (!stored) {
       setToken(null);
       setUser(null);
-      setAxiosAuthHeader(null);
       return { authenticated: false };
     }
     try {
       setToken(stored);
-      setAxiosAuthHeader(stored);
       const res = await api.get('/auth/me');
       if (res.data?.success) {
         setUser(res.data.user);
@@ -82,7 +76,6 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
-    setAxiosAuthHeader(null);
     return { authenticated: false };
   };
 
@@ -92,7 +85,7 @@ export const AuthProvider = ({ children }) => {
       if (res.data.success) {
         return {
           success: true,
-          message: res.data.message || 'Registration successful! Please check your email.'
+          message: res.data.message || 'Registration successful! Please check your email.',
         };
       }
       return { success: false, error: res.data.error || 'Registration failed' };
@@ -107,14 +100,13 @@ export const AuthProvider = ({ children }) => {
       if (res.data?.success && res.data.token) {
         localStorage.setItem('token', res.data.token);
         setToken(res.data.token);
-        setAxiosAuthHeader(res.data.token);
         setUser(res.data.user || null);
         return { success: true };
       }
       return {
         success: false,
         error: res.data?.error || 'Invalid credentials',
-        emailNotVerified: res.data?.emailNotVerified || false
+        emailNotVerified: res.data?.emailNotVerified || false,
       };
     } catch (error) {
       const msg = error?.response?.data?.error || error.message || 'Login failed. Please try again.';
@@ -125,22 +117,19 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      // If you have a server-side logout route, call it; otherwise just clear storage
       await api.post?.('/auth/logout').catch(() => {});
     } catch {}
     localStorage.removeItem('token');
     setToken(null);
-    setAxiosAuthHeader(null);
     setUser(null);
     window.location.href = '/login';
   };
 
-  // Allow setting token from OAuth callback easily
+  // Let OAuth callback push a token into context
   const applyToken = async (newToken) => {
     if (!newToken) return;
     localStorage.setItem('token', newToken);
     setToken(newToken);
-    setAxiosAuthHeader(newToken);
     try {
       const res = await api.get('/auth/me');
       if (res.data?.success) setUser(res.data.user);
@@ -157,12 +146,12 @@ export const AuthProvider = ({ children }) => {
     logout,
     checkAuth,
     applyToken,
-    setToken // expose if needed by guards
+    setToken,
   };
 
   if (!initialized) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', justifyContent: 'center' }}>
         <div className="loading-spinner-large"></div>
         <p>Loading...</p>
       </div>
