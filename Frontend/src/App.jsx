@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
@@ -11,11 +11,24 @@ import ServiceLocator from './components/ServiceLocator';
 import api from './services/api';
 import './App.css';
 
-// 1) TokenCapture: runs BEFORE routes render to ensure token exists for PrivateRoute
-function TokenCapture({ onReady }) {
+// Attach token to axios default header immediately
+function setAxiosAuthHeader(token) {
+  try {
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    } else {
+      delete api.defaults.headers.common['Authorization'];
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+// 1) Capture token before routes render so PrivateRoute doesn't bounce
+function TokenBootstrap({ onReady }) {
   const location = useLocation();
 
-  useEffect(() => {
+  const bootstrap = useCallback(() => {
     try {
       const url = new URL(window.location.href);
       let token = null;
@@ -33,25 +46,33 @@ function TokenCapture({ onReady }) {
       if (!token && url.hash && url.hash.startsWith('#')) {
         const hp = new URLSearchParams(url.hash.substring(1));
         token = hp.get('token');
-        // Clean hash
         window.history.replaceState(null, '', url.pathname + url.search);
       }
 
       if (token) {
         localStorage.setItem('token', token);
+        setAxiosAuthHeader(token);
+      } else {
+        // ensure axios header reflects current storage (maybe was set before)
+        const existing = localStorage.getItem('token');
+        setAxiosAuthHeader(existing);
       }
     } catch (e) {
-      console.warn('TokenCapture failed:', e);
+      // noop
     } finally {
-      // Signal that the token capture step is done (so routes can render)
       onReady(true);
     }
-  }, [location, onReady]);
+  }, [onReady]);
+
+  useEffect(() => {
+    bootstrap();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
 
   return null;
 }
 
-// 2) OAuth Callback Handler (public route)
+// 2) OAuth callback page (public) - also stores token and navigates to /dashboard
 function OAuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -59,61 +80,48 @@ function OAuthCallback() {
   const [status, setStatus] = useState('processing');
 
   useEffect(() => {
-    const handleOAuthCallback = async () => {
-      // Check both query and hash
+    const handle = async () => {
       let token = searchParams.get('token');
       const error = searchParams.get('error');
 
       if (!token && window.location.hash && window.location.hash.startsWith('#')) {
         const hp = new URLSearchParams(window.location.hash.substring(1));
         token = hp.get('token');
-        // Clean hash
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
       }
 
       if (error) {
-        console.error('❌ OAuth error:', error);
         setStatus('error');
-        setTimeout(() => {
-          navigate('/login?error=oauth_failed', { replace: true });
-        }, 1200);
-        return;
+        return setTimeout(() => navigate('/login?error=oauth_failed', { replace: true }), 1000);
       }
 
-      if (token) {
+      if (!token) {
+        return navigate('/login', { replace: true });
+      }
+
+      try {
+        localStorage.setItem('token', token);
+        setAxiosAuthHeader(token);
+
+        // Try to fetch user (optional)
         try {
-          // Store token
-          localStorage.setItem('token', token);
-
-          // Try to fetch user (optional, but nice for immediate UI)
-          try {
-            const response = await api.get('/auth/me');
-            if (response.data?.success) {
-              setUser(response.data.user);
-            }
-          } catch (e) {
-            // Even if /me fails now, token is saved; AuthContext can hydrate later
-          }
-
-          setStatus('success');
-          setTimeout(() => {
-            navigate('/dashboard', { replace: true });
-          }, 500);
-        } catch (error) {
-          console.error('❌ OAuth processing error:', error);
-          localStorage.removeItem('token');
-          setStatus('error');
-          setTimeout(() => {
-            navigate('/login?error=session_failed', { replace: true });
-          }, 1200);
+          const res = await api.get('/auth/me');
+          if (res.data?.success) setUser(res.data.user);
+        } catch (e) {
+          // ignore; AuthContext can hydrate later
         }
-      } else {
-        // No token → go to login
-        navigate('/login', { replace: true });
+
+        setStatus('success');
+        setTimeout(() => navigate('/dashboard', { replace: true }), 400);
+      } catch (e) {
+        localStorage.removeItem('token');
+        setAxiosAuthHeader(null);
+        setStatus('error');
+        setTimeout(() => navigate('/login?error=session_failed', { replace: true }), 1000);
       }
     };
 
-    handleOAuthCallback();
+    handle();
   }, [searchParams, navigate, setUser]);
 
   return (
@@ -145,20 +153,17 @@ function OAuthCallback() {
   );
 }
 
-// 3) Main App (Dashboard/Monitor/Services)
+// 3) Main app content (protected)
 function MainApp() {
   const [activeTab, setActiveTab] = useState('monitor');
   const [equipmentList, setEquipmentList] = useState([]);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [prefillData, setPrefillData] = useState(null);
   const [loading, setLoading] = useState(true);
-
   const { user, logout } = useAuth();
 
   useEffect(() => {
-    if (user) {
-      fetchEquipmentList();
-    }
+    if (user) fetchEquipmentList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -168,7 +173,6 @@ function MainApp() {
       const response = await api.get('/history');
       if (response.data.success) {
         setEquipmentList(response.data.history || []);
-        console.log(`✅ Loaded ${response.data.history?.length || 0} equipment records`);
       } else {
         setEquipmentList([]);
       }
@@ -299,10 +303,9 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        {/* Capture token before rendering routes to avoid race with PrivateRoute */}
         {!bootReady ? (
           <>
-            <TokenCapture onReady={setBootReady} />
+            <TokenBootstrap onReady={setBootReady} />
             <div className="oauth-callback-container">
               <div className="oauth-callback-card">
                 <div className="loading-spinner-large"></div>
