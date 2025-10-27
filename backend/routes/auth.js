@@ -30,7 +30,7 @@ router.get('/google/failure', (req, res) => {
   res.status(401).json({ success: false, error: 'Google authentication failed' });
 });
 
-// Google ID Token sign-in (client-side flow, e.g., Firebase Google sign-in)
+// Google ID Token sign-in (client-side flow)
 router.post('/google/token', authController.googleTokenSignIn);
 
 // Private

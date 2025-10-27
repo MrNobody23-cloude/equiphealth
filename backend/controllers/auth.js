@@ -214,6 +214,42 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
+// Reset password (THIS WAS MISSING EARLIER)
+exports.resetPassword = async (req, res) => {
+  try {
+    const resetPasswordToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired reset token' });
+    }
+
+    if (!req.body.password) {
+      return res.status(400).json({ success: false, error: 'Password is required' });
+    }
+
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    const token = user.getSignedJwtToken();
+
+    return res.status(200).json({
+      success: true,
+      token,
+      message: 'Password reset successful'
+    });
+
+  } catch (error) {
+    return res.status(500).json({ success: false, error: 'Error in password reset process' });
+  }
+};
+
 // Get current user
 exports.getMe = async (req, res) => {
   try {
@@ -250,7 +286,7 @@ exports.cleanupUnverifiedUsers = async (req, res) => {
   }
 };
 
-// NEW: Google OAuth server-side success handler
+// Google OAuth server-side success handler
 exports.googleOAuthSuccess = async (req, res) => {
   try {
     const user = req.user;
@@ -271,7 +307,7 @@ exports.googleOAuthSuccess = async (req, res) => {
   }
 };
 
-// NEW: Google ID Token sign-in (client-side flow: send idToken from frontend)
+// Google ID Token sign-in (client-side flow)
 exports.googleTokenSignIn = async (req, res) => {
   try {
     const { idToken } = req.body;
@@ -287,7 +323,7 @@ exports.googleTokenSignIn = async (req, res) => {
     const email = payload.email;
     const emailVerified = payload.email_verified;
     const name = payload.name || 'Google User';
-    const picture = payload.picture || null;
+    thePicture = payload.picture || null;
     const googleSub = payload.sub;
 
     if (!email || !emailVerified) {
@@ -297,7 +333,6 @@ exports.googleTokenSignIn = async (req, res) => {
     let user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
-      // Create new google user
       const randomPassword = crypto.randomBytes(32).toString('hex');
       user = await User.create({
         name,
@@ -305,16 +340,15 @@ exports.googleTokenSignIn = async (req, res) => {
         password: randomPassword,
         provider: 'google',
         googleId: googleSub,
-        avatar: picture,
+        avatar: thePicture,
         emailVerified: true,
         accountStatus: 'active',
         isActive: true
       });
     } else {
-      // Update existing
       user.provider = user.provider === 'local' ? 'local' : 'google';
       user.googleId = user.googleId || googleSub;
-      user.avatar = user.avatar || picture;
+      user.avatar = user.avatar || thePicture;
       user.emailVerified = true;
       user.accountStatus = 'active';
       user.isActive = true;
