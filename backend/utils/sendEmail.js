@@ -1,23 +1,7 @@
 /**
  * Universal Email Service
- * Automatically uses available email provider (Gmail OAuth2 or SMTP)
+ * Uses global email service wrapper initialized in server.js
  */
-
-let emailService = null;
-
-const initializeEmailService = () => {
-  if (emailService) return emailService;
-  
-  // Get the email service from server instance
-  try {
-    const serverModule = require('../server');
-    emailService = serverModule.emailService;
-    return emailService;
-  } catch (error) {
-    console.warn('⚠️  Email service not available:', error.message);
-    return null;
-  }
-};
 
 /**
  * Send email using available provider
@@ -38,31 +22,42 @@ const sendEmail = async (options) => {
       throw new Error('Missing required email fields (email, subject, html)');
     }
 
-    // Get email service
-    const service = initializeEmailService();
+    // Get email service from global
+    const emailService = global.emailService;
     
-    if (!service) {
-      console.warn('⚠️  Email service not configured - email not sent');
+    if (!emailService) {
+      console.warn('⚠️  Email service not initialized');
       return {
         success: false,
-        error: 'Email service not configured',
+        error: 'Email service not initialized',
         provider: 'none'
       };
     }
 
+    // Check if email service is configured
+    if (!emailService.isConfigured()) {
+      console.warn('⚠️  Email service not configured - email not sent');
+      return {
+        success: false,
+        error: 'Email service not configured',
+        provider: 'none',
+        autoVerify: true // Flag to auto-verify user
+      };
+    }
+
     // Send email
-    const result = await service.sendEmail(options);
+    const result = await emailService.sendEmail(options);
     
     if (result.success) {
-      console.log(`✅ Email sent via ${result.provider}\n`);
+      console.log(`✅ Email sent successfully via ${result.provider}`);
     } else {
-      console.warn(`⚠️  Email failed: ${result.error}\n`);
+      console.warn(`⚠️  Email failed: ${result.error}`);
     }
 
     return result;
 
   } catch (error) {
-    console.error('❌ Email send failed:', error.message);
+    console.error('❌ Email send error:', error.message);
     
     // Return error object instead of throwing
     return {

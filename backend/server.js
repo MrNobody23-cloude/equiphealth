@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const axios = require('axios');
 const connectDB = require('./config/database');
 require('./config/passport');
+const logSanitizer = require('./utils/sanitizeLogs');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -30,7 +31,7 @@ app.use(cors({
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      console.log('⚠️ Blocked origin:', origin);
+      console.log('⚠️  Blocked origin:', origin);
       callback(null, process.env.NODE_ENV !== 'production');
     }
   },
@@ -125,6 +126,7 @@ class EmailServiceWrapper {
     }
 
     console.log('⚠️  No email service available - app will continue without email');
+    console.log('   Users will be auto-verified until email is configured');
     console.log('━'.repeat(70));
     return false;
   }
@@ -169,6 +171,7 @@ class EmailServiceWrapper {
     }
 
     // No email service available
+    console.warn('⚠️  No email service available');
     return { 
       success: false, 
       error: 'Email service not configured', 
@@ -184,12 +187,16 @@ class EmailServiceWrapper {
       primaryProvider: this.gmailReady ? 'Gmail OAuth2' : this.basicEmailReady ? 'Basic SMTP' : 'None'
     };
   }
+
+  isConfigured() {
+    return this.gmailReady || this.basicEmailReady;
+  }
 }
 
 const emailServiceWrapper = new EmailServiceWrapper();
 
-// Export email service for use in other modules
-module.exports.emailService = emailServiceWrapper;
+// Make email service globally available
+global.emailService = emailServiceWrapper;
 
 // ==================== MODELS ====================
 const EquipmentHistory = require('./models/EquipmentHistory');
@@ -204,18 +211,20 @@ let mlPredictionController;
 try {
   mlPredictionController = require('./controllers/mlPrediction');
 } catch (error) {
-  console.warn('⚠️ ML controller not found:', error.message);
+  logSanitizer.warn('⚠️  ML controller not found:', error.message);
 }
 
 // ==================== GMAIL OAUTH2 ROUTES ====================
 
 if (emailServiceWrapper.gmailService) {
+  console.log('\n🔧 Registering Gmail OAuth2 routes...');
+
   app.get('/auth/gmail/status', (req, res) => {
     try {
       const status = emailServiceWrapper.gmailService.getStatus();
       const allConfigured = status.hasClientId && status.hasClientSecret && 
                            status.hasRefreshToken && status.hasUserEmail;
-
+      
       res.json({
         success: true,
         configured: allConfigured,
@@ -248,17 +257,17 @@ if (emailServiceWrapper.gmailService) {
   app.get('/auth/gmail/callback', async (req, res) => {
     try {
       const { code, error } = req.query;
-
+      
       if (error) {
         return res.send(`<h1>❌ OAuth Error: ${error}</h1>`);
       }
-
+      
       if (!code) {
         return res.send('<h1>❌ Missing authorization code</h1>');
       }
-
+      
       const tokens = await emailServiceWrapper.gmailService.getTokens(code);
-
+      
       res.send(`
         <!DOCTYPE html>
         <html>
@@ -301,6 +310,8 @@ if (emailServiceWrapper.gmailService) {
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+  console.log('✅ Gmail routes registered\n');
 }
 
 // ==================== EMAIL SERVICE STATUS ====================
@@ -309,6 +320,7 @@ app.get('/api/email/status', (req, res) => {
   res.json({
     success: true,
     status: emailServiceWrapper.getStatus(),
+    configured: emailServiceWrapper.isConfigured(),
     timestamp: new Date().toISOString()
   });
 });
@@ -355,12 +367,167 @@ app.get('/health', (req, res) => {
 const authRoutes = require('./routes/auth');
 app.use('/api/auth', authRoutes);
 
+// ==================== GOOGLE MAPS SCRIPT PROXY ====================
+
+app.get('/api/maps/config', (req, res) => {
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://equiphealth-23.web.app',
+    'https://equiphealth-23.firebaseapp.com'
+  ];
+
+  const origin = req.headers.origin;
+  
+  if (!allowedOrigins.includes(origin)) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  res.json({
+    apiKey: process.env.GOOGLE_MAPS_API_KEY,
+    scriptUrl: `https://maps.googleapis.com/maps/api/js?key=${process.env.GOOGLE_MAPS_API_KEY}&libraries=places&loading=async`
+  });
+});
+
 // ==================== SERVICE LOCATOR ROUTES ====================
+
+console.log('🔧 Registering Service Locator routes...');
 const serviceLocatorRoutes = require('./controllers/serviceLocator');
 app.use('/api/service-locator', serviceLocatorRoutes);
 
+app.get('/api/service-locator', async (req, res) => {
+  console.log('🔍 Service locator:', req.query);
+  
+  try {
+    const { type, latitude, longitude, pincode, radius } = req.query;
+
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(503).json({
+        success: false,
+        error: 'Google Maps API not configured'
+      });
+    }
+
+    let searchLocation = { lat: null, lng: null };
+
+    if (pincode) {
+      console.log(`📍 Geocoding: ${pincode}`);
+      const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${pincode}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+      const geocodeResponse = await axios.get(geocodeUrl);
+      
+      if (geocodeResponse.data.status === 'OK' && geocodeResponse.data.results.length > 0) {
+        searchLocation = geocodeResponse.data.results[0].geometry.location;
+        console.log(`✅ Location: ${searchLocation.lat}, ${searchLocation.lng}`);
+      } else {
+        return res.status(400).json({ success: false, error: 'Invalid pincode' });
+      }
+    } else if (latitude && longitude) {
+      searchLocation = { lat: parseFloat(latitude), lng: parseFloat(longitude) };
+    } else {
+      return res.status(400).json({ success: false, error: 'Provide pincode or coordinates' });
+    }
+
+    const equipmentTypeMap = {
+      laptop: 'laptop repair service',
+      desktop: 'computer repair service',
+      printer: 'printer repair service',
+      fan: 'fan repair service',
+      motor: 'motor repair service',
+      ac: 'AC repair service',
+      refrigerator: 'refrigerator repair service'
+    };
+
+    const searchQuery = equipmentTypeMap[type?.toLowerCase()] || 'electronics repair service';
+    const searchRadius = radius || 5000;
+
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation.lat},${searchLocation.lng}&radius=${searchRadius}&keyword=${encodeURIComponent(searchQuery)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    
+    const placesResponse = await axios.get(placesUrl);
+
+    if (placesResponse.data.status !== 'OK' && placesResponse.data.status !== 'ZERO_RESULTS') {
+      return res.status(500).json({ success: false, error: 'Google Places API error' });
+    }
+
+    const providers = placesResponse.data.results.map(place => ({
+      id: place.place_id,
+      name: place.name,
+      address: place.vicinity,
+      location: {
+        lat: place.geometry.location.lat,
+        lng: place.geometry.location.lng
+      },
+      rating: place.rating || 0,
+      totalRatings: place.user_ratings_total || 0,
+      isOpen: place.opening_hours?.open_now,
+      types: place.types,
+      photos: place.photos?.map(photo => ({
+        url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+      })) || []
+    }));
+
+    console.log(`✅ Found ${providers.length} providers`);
+
+    res.json({
+      success: true,
+      count: providers.length,
+      providers,
+      searchLocation,
+      searchRadius,
+      equipmentType: type
+    });
+
+  } catch (error) {
+    console.error('❌ Service locator error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/service-locator/place/:placeId', async (req, res) => {
+  try {
+    const { placeId } = req.params;
+
+    if (!process.env.GOOGLE_MAPS_API_KEY) {
+      return res.status(503).json({ success: false, error: 'Google Maps API not configured' });
+    }
+
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,reviews,photos,geometry&key=${process.env.GOOGLE_MAPS_API_KEY}`;
+    
+    const response = await axios.get(detailsUrl);
+
+    if (response.data.status !== 'OK') {
+      return res.status(404).json({ success: false, error: 'Place not found' });
+    }
+
+    const place = response.data.result;
+    
+    res.json({
+      success: true,
+      details: {
+        id: placeId,
+        name: place.name,
+        address: place.formatted_address,
+        phone: place.formatted_phone_number,
+        website: place.website,
+        location: place.geometry.location,
+        rating: place.rating || 0,
+        totalRatings: place.user_ratings_total || 0,
+        openingHours: place.opening_hours,
+        reviews: place.reviews?.slice(0, 5) || [],
+        photos: place.photos?.map(photo => ({
+          url: `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${photo.photo_reference}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+        })) || []
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+console.log('✅ Service Locator routes registered\n');
+
 // ==================== PROTECTED ROUTES ====================
-const { protect } = require('./middleware/auth');
 
 app.post('/api/predict', protect, async (req, res) => {
   try {
@@ -413,6 +580,7 @@ app.post('/api/predict', protect, async (req, res) => {
     }
 
     res.json({ success: true, prediction, timestamp: new Date().toISOString() });
+
   } catch (error) {
     console.error('❌ Prediction error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -423,7 +591,7 @@ app.get('/api/history', protect, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const query = { user: req.user._id };
-
+    
     if (req.query.equipmentType) query.equipmentType = req.query.equipmentType;
     if (req.query.riskLevel) query['prediction.risk_level'] = req.query.riskLevel;
 
@@ -433,6 +601,58 @@ app.get('/api/history', protect, async (req, res) => {
     } else {
       res.json({ success: true, history: [], count: 0 });
     }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/history/:id', protect, async (req, res) => {
+  try {
+    if (!global.dbConnected) {
+      return res.status(503).json({ success: false, error: 'DB not connected' });
+    }
+    
+    const history = await EquipmentHistory.findOne({ _id: req.params.id, user: req.user._id });
+    
+    if (!history) {
+      return res.status(404).json({ success: false, error: 'Not found' });
+    }
+    
+    res.json({ success: true, history });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/history/:id', protect, async (req, res) => {
+  try {
+    if (!global.dbConnected) {
+      return res.status(503).json({ success: false, error: 'DB not connected' });
+    }
+    
+    const result = await EquipmentHistory.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Not found' });
+    }
+    
+    console.log(`🗑️  Deleted: ${req.params.id}`);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.delete('/api/history', protect, async (req, res) => {
+  try {
+    if (!global.dbConnected) {
+      return res.status(503).json({ success: false, error: 'DB not connected' });
+    }
+    
+    const result = await EquipmentHistory.deleteMany({ user: req.user._id });
+    console.log(`🗑️  Cleared ${result.deletedCount} entries`);
+    
+    res.json({ success: true, message: `Deleted ${result.deletedCount}`, deletedCount: result.deletedCount });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -455,7 +675,7 @@ app.get('/api/stats', protect, async (req, res) => {
     }
 
     const totalAnalyses = await EquipmentHistory.countDocuments({ user: req.user._id });
-
+    
     const equipmentTypes = await EquipmentHistory.aggregate([
       { $match: { user: req.user._id } },
       { $group: { _id: '$equipmentType', count: { $sum: 1 } } }
@@ -528,7 +748,7 @@ app.use((err, req, res, next) => {
 const startServer = async () => {
   try {
     console.log('\n🚀 Starting Equipment Health Monitor...\n');
-
+    
     await connectDB();
     const emailReady = await emailServiceWrapper.initialize();
 
@@ -542,12 +762,26 @@ const startServer = async () => {
       console.log(`🔗 Backend:    ${backendUrl}`);
       console.log(`🌐 Frontend:   ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
       console.log(`🗄️  Database:   ${global.dbConnected ? '✅ Connected' : '⚠️  Disconnected'}`);
-      console.log(`📧 Email:      ${emailReady ? '✅ Ready' : '⚠️  Not Configured'}`);
+      console.log(`📧 Email:      ${emailReady ? '✅ Ready' : '⚠️  Not Configured (Auto-verify enabled)'}`);
       const emailStatus = emailServiceWrapper.getStatus();
       console.log(`   Provider:   ${emailStatus.primaryProvider}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log('═'.repeat(70));
+      console.log('📍 Routes Registered:');
+      console.log('   GET  /                                ✅');
+      console.log('   GET  /health                          ✅');
+      console.log('   GET  /api/email/status                ✅');
+      console.log('   GET  /auth/gmail/status               ✅');
+      console.log('   POST /api/auth/register               ✅');
+      console.log('   POST /api/auth/login                  ✅');
+      console.log('   POST /api/predict                     ✅');
+      console.log('   GET  /api/history                     ✅');
+      console.log('   GET  /api/stats                       ✅');
+      console.log('   GET  /api/service-locator             ✅');
+      console.log('   GET  /api/service-locator/place/:id   ✅');
       console.log('═'.repeat(70) + '\n');
     });
+
   } catch (error) {
     console.error('❌ Startup failed:', error);
     process.exit(1);
