@@ -1,3 +1,4 @@
+// backend/server.js
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -9,6 +10,7 @@ const axios = require('axios');
 const connectDB = require('./config/database');
 require('./config/passport');
 const logSanitizer = require('./utils/sanitizeLogs');
+const gmailService = require('./config/gmail'); // IMPORTANT: import Gmail service
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -75,202 +77,56 @@ app.use((req, res, next) => {
   next();
 });
 
-// ==================== EMAIL SERVICE WRAPPER ====================
-class EmailServiceWrapper {
-  constructor() {
-    this.gmailService = null;
-    this.basicEmailTransporter = null;
-    this.gmailReady = false;
-    this.basicEmailReady = false;
+// ━━━━━━━━━━━━━ GMAIL OAUTH2 ROUTES (ALWAYS REGISTERED) ━━━━━━━━━━━━━
+console.log('\n🔧 Registering Gmail OAuth2 routes...');
+
+app.get('/auth/gmail/status', async (req, res) => {
+  try {
+    const status = gmailService.getStatus();
+    res.json({
+      success: true,
+      initialized: status.initialized,
+      method: status.method,
+      redirectUri: status.redirectUri,
+      smtpFallback: status.smtpFallback,
+      configured: status.hasClientId && status.hasClientSecret && status.hasUserEmail,
+      refreshTokenSet: status.hasRefreshToken,
+      status: {
+        clientId: status.hasClientId ? '✅' : '❌',
+        clientSecret: status.hasClientSecret ? '✅' : '❌',
+        refreshToken: status.hasRefreshToken ? '✅' : '❌',
+        userEmail: status.hasUserEmail ? `✅ ${process.env.GMAIL_USER_EMAIL}` : '❌'
+      },
+      setupUrl: !status.hasRefreshToken
+        ? `${req.protocol}://${req.get('host')}/auth/gmail/authorize`
+        : null
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
+});
 
-  async initialize() {
-    console.log('\n' + '━'.repeat(70));
-    console.log('📧 EMAIL SERVICE INITIALIZATION');
-    console.log('━'.repeat(70));
-
-    // Try Gmail OAuth2 first
-    try {
-      this.gmailService = require('./config/gmail');
-      console.log('\n🔄 Initializing Gmail OAuth2...');
-      this.gmailReady = await this.gmailService.initialize();
-      
-      if (this.gmailReady) {
-        console.log('✅ Gmail OAuth2 initialized');
-        const verified = await this.gmailService.verify();
-        if (verified) {
-          console.log('✅ Gmail OAuth2 verified and ready');
-          console.log('━'.repeat(70));
-          return true;
-        }
-      }
-    } catch (error) {
-      console.error('❌ Gmail OAuth2 failed:', error.message);
-    }
-
-    // Try basic SMTP as fallback
-    try {
-      const emailConfig = require('./config/email');
-      this.basicEmailTransporter = emailConfig.createTransporter;
-      
-      console.log('\n🔄 Initializing basic SMTP...');
-      this.basicEmailReady = await emailConfig.verifyTransporter();
-      
-      if (this.basicEmailReady) {
-        console.log('✅ Basic SMTP initialized');
-        console.log('━'.repeat(70));
-        return true;
-      }
-    } catch (error) {
-      console.error('❌ Basic SMTP failed:', error.message);
-    }
-
-    console.log('⚠️  No email service available - app will continue without email');
-    console.log('   Users will be auto-verified until email is configured');
-    console.log('━'.repeat(70));
-    return false;
+app.get('/auth/gmail/authorize', (req, res) => {
+  try {
+    const authUrl = gmailService.getAuthUrl();
+    return res.redirect(authUrl);
+  } catch (err) {
+    return res.status(500).send(`<h1>Error: ${err.message}</h1>`);
   }
+});
 
-  async sendEmail({ email, subject, html, text }) {
-    // Try Gmail OAuth2 first
-    if (this.gmailReady && this.gmailService) {
-      try {
-        console.log('📧 Sending via Gmail OAuth2...');
-        return await this.gmailService.sendEmail({ email, subject, html, text });
-      } catch (error) {
-        console.error('❌ Gmail OAuth2 failed:', error.message);
-        console.log('🔄 Falling back to basic SMTP...');
-      }
-    }
+app.get('/auth/gmail/callback', async (req, res) => {
+  try {
+    const { code, error } = req.query;
+    if (error) return res.send(`<h1>❌ OAuth Error: ${error}</h1>`);
+    if (!code) return res.send('<h1>❌ Missing authorization code</h1>');
 
-    // Fallback to basic SMTP
-    if (this.basicEmailReady && this.basicEmailTransporter) {
-      try {
-        console.log('📧 Sending via basic SMTP...');
-        const transporter = this.basicEmailTransporter();
-        
-        if (!transporter) {
-          throw new Error('SMTP transporter not available');
-        }
+    const tokens = await gmailService.getTokens(code);
+    const rt = tokens.refresh_token;
 
-        const result = await transporter.sendMail({
-          from: `"Equipment Health Monitor" <${process.env.EMAIL_FROM || process.env.EMAIL_USERNAME}>`,
-          to: email,
-          subject: subject,
-          html: html,
-          text: text || html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
-        });
-
-        console.log(`✅ Email sent via SMTP - ID: ${result.messageId}`);
-        return { success: true, messageId: result.messageId, provider: 'smtp' };
-
-      } catch (error) {
-        console.error('❌ Basic SMTP failed:', error.message);
-        return { success: false, error: error.message, provider: 'smtp' };
-      }
-    }
-
-    // No email service available
-    console.warn('⚠️  No email service available');
-    return { 
-      success: false, 
-      error: 'Email service not configured', 
-      provider: 'none' 
-    };
-  }
-
-  getStatus() {
-    return {
-      gmailOAuth2: this.gmailReady ? '✅ Ready' : '❌ Not Available',
-      basicSMTP: this.basicEmailReady ? '✅ Ready' : '❌ Not Available',
-      anyAvailable: this.gmailReady || this.basicEmailReady,
-      primaryProvider: this.gmailReady ? 'Gmail OAuth2' : this.basicEmailReady ? 'Basic SMTP' : 'None'
-    };
-  }
-
-  isConfigured() {
-    return this.gmailReady || this.basicEmailReady;
-  }
-}
-
-const emailServiceWrapper = new EmailServiceWrapper();
-
-// Make email service globally available
-global.emailService = emailServiceWrapper;
-
-// ==================== MODELS ====================
-const EquipmentHistory = require('./models/EquipmentHistory');
-
-// ==================== MIDDLEWARE ====================
-const { protect } = require('./middleware/auth');
-const { validatePredictionInput } = require('./utils/validators');
-
-// ==================== CONTROLLERS ====================
-let mlPredictionController;
-
-try {
-  mlPredictionController = require('./controllers/mlPrediction');
-} catch (error) {
-  logSanitizer.warn('⚠️  ML controller not found:', error.message);
-}
-
-// ==================== GMAIL OAUTH2 ROUTES ====================
-
-if (emailServiceWrapper.gmailService) {
-  console.log('\n🔧 Registering Gmail OAuth2 routes...');
-
-  app.get('/auth/gmail/status', (req, res) => {
-    try {
-      const status = emailServiceWrapper.gmailService.getStatus();
-      const allConfigured = status.hasClientId && status.hasClientSecret && 
-                           status.hasRefreshToken && status.hasUserEmail;
-      
-      res.json({
-        success: true,
-        configured: allConfigured,
-        initialized: status.initialized,
-        status: {
-          clientId: status.hasClientId ? '✅' : '❌',
-          clientSecret: status.hasClientSecret ? '✅' : '❌',
-          refreshToken: status.hasRefreshToken ? '✅' : '❌',
-          userEmail: status.hasUserEmail ? `✅ ${process.env.GMAIL_USER_EMAIL}` : '❌',
-          method: status.method
-        },
-        setupUrl: !status.hasRefreshToken
-          ? `${req.protocol}://${req.get('host')}/auth/gmail/authorize`
-          : null
-      });
-    } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
-
-  app.get('/auth/gmail/authorize', (req, res) => {
-    try {
-      const authUrl = emailServiceWrapper.gmailService.getAuthUrl();
-      res.redirect(authUrl);
-    } catch (error) {
-      res.status(500).send(`<h1>Error: ${error.message}</h1>`);
-    }
-  });
-
-  app.get('/auth/gmail/callback', async (req, res) => {
-    try {
-      const { code, error } = req.query;
-      
-      if (error) {
-        return res.send(`<h1>❌ OAuth Error: ${error}</h1>`);
-      }
-      
-      if (!code) {
-        return res.send('<h1>❌ Missing authorization code</h1>');
-      }
-      
-      const tokens = await emailServiceWrapper.gmailService.getTokens(code);
-      
-      res.send(`
-        <!DOCTYPE html>
-        <html>
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
         <head>
           <title>Gmail OAuth2 Success</title>
           <style>
@@ -280,53 +136,81 @@ if (emailServiceWrapper.gmailService) {
           </style>
         </head>
         <body>
-          <h1>✅ Success!</h1>
-          ${tokens.refresh_token ? `
-            <h2>Your Refresh Token:</h2>
-            <div class="token" id="token">${tokens.refresh_token}</div>
-            <button onclick="navigator.clipboard.writeText(document.getElementById('token').textContent).then(() => alert('Copied!'))">
+          <h1>✅ Gmail OAuth2 Success</h1>
+          ${rt ? `
+            <p><strong>Refresh Token (copy and add to Render env as GMAIL_REFRESH_TOKEN):</strong></p>
+            <div class="token" id="token">${rt}</div>
+            <button onclick="navigator.clipboard.writeText(document.getElementById('token').textContent).then(()=>alert('Copied!'))">
               Copy Token
             </button>
-            <p>Add to Render Environment: <code>GMAIL_REFRESH_TOKEN=${tokens.refresh_token.substring(0, 30)}...</code></p>
-          ` : '<p>No refresh token. Revoke access and try again.</p>'}
+            <p>Scope must include: <code>https://www.googleapis.com/auth/gmail.send</code></p>
+          ` : `
+            <p>No refresh token returned. You may have already consented. Revoke this app's access from your Google Account (Security > Third-party access) and authorize again.</p>
+          `}
         </body>
-        </html>
-      `);
-    } catch (error) {
-      res.status(500).send(`<h1>Error: ${error.message}</h1>`);
+      </html>
+    `);
+  } catch (err) {
+    return res.status(500).send(`<h1>Error: ${err.message}</h1>`);
+  }
+});
+
+// Debug: show granted scopes for current token
+app.get('/auth/gmail/scopes', async (req, res) => {
+  try {
+    const ok = await gmailService.initialize();
+    if (!ok) {
+      return res.status(503).json({ success: false, error: 'Gmail not initialized' });
     }
-  });
+    const scopes = await gmailService.getGrantedScopes();
+    return res.json({
+      success: true,
+      email: process.env.GMAIL_USER_EMAIL,
+      grantedScopes: scopes
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
 
-  app.post('/auth/gmail/send-test', async (req, res) => {
-    try {
-      const { email } = req.body;
-      if (!email) {
-        return res.status(400).json({ success: false, error: 'Email required' });
-      }
+// Send a test email
+app.post('/auth/gmail/send-test', express.json(), async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, error: 'Email required' });
 
-      const result = await emailServiceWrapper.gmailService.sendTestEmail(email);
-      res.json({ success: true, messageId: result.messageId });
-    } catch (error) {
-      res.status(500).json({ success: false, error: error.message });
-    }
-  });
+    const result = await gmailService.sendEmail({
+      email,
+      subject: '✅ Gmail API Test - Equipment Health Monitor',
+      html: '<h2>Test OK</h2><p>This is a test sent via Gmail API.</p>'
+    });
 
-  console.log('✅ Gmail routes registered\n');
-}
+    if (result.success) return res.json({ success: true, messageId: result.messageId, provider: result.provider });
+    return res.status(503).json({ success: false, error: result.error, provider: result.provider });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-// ==================== EMAIL SERVICE STATUS ====================
+console.log('✅ Gmail routes registered\n');
+// ━━━━━━━━━━━━━ END GMAIL OAUTH2 ROUTES ━━━━━━━━━━━━━
 
-app.get('/api/email/status', (req, res) => {
+// ==================== EMAIL STATUS ====================
+app.get('/api/email/status', async (req, res) => {
+  const status = gmailService.getStatus();
   res.json({
     success: true,
-    status: emailServiceWrapper.getStatus(),
-    configured: emailServiceWrapper.isConfigured(),
+    status: {
+      gmailOAuth2: status.initialized ? '✅ Ready' : '❌ Not Ready',
+      configured: status.hasClientId && status.hasClientSecret && status.hasUserEmail,
+      refreshTokenSet: status.hasRefreshToken,
+      method: status.method
+    },
     timestamp: new Date().toISOString()
   });
 });
 
 // ==================== PUBLIC ROUTES ====================
-
 app.get('/', (req, res) => {
   res.json({
     message: '🤖 AI Equipment Health Monitor API',
@@ -334,7 +218,7 @@ app.get('/', (req, res) => {
     status: 'running',
     timestamp: new Date().toISOString(),
     database: global.dbConnected ? 'connected' : 'in-memory',
-    email: emailServiceWrapper.getStatus(),
+    email: gmailService.getStatus(),
     endpoints: {
       auth: '/api/auth',
       predict: '/api/predict',
@@ -348,6 +232,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
+  const status = gmailService.getStatus();
   res.json({
     success: true,
     status: 'healthy',
@@ -355,7 +240,7 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || 'development',
     database: global.dbConnected ? 'connected' : 'disconnected',
-    email: emailServiceWrapper.getStatus().anyAvailable ? 'ready' : 'not-configured',
+    email: status.initialized ? 'ready' : 'not-configured',
     memory: {
       used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
       total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
@@ -368,7 +253,6 @@ const authRoutes = require('./routes/auth');
 app.use('/api/auth', authRoutes);
 
 // ==================== GOOGLE MAPS SCRIPT PROXY ====================
-
 app.get('/api/maps/config', (req, res) => {
   const allowedOrigins = [
     process.env.FRONTEND_URL,
@@ -379,7 +263,6 @@ app.get('/api/maps/config', (req, res) => {
   ];
 
   const origin = req.headers.origin;
-  
   if (!allowedOrigins.includes(origin)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -391,22 +274,18 @@ app.get('/api/maps/config', (req, res) => {
 });
 
 // ==================== SERVICE LOCATOR ROUTES ====================
-
 console.log('🔧 Registering Service Locator routes...');
 const serviceLocatorRoutes = require('./controllers/serviceLocator');
 app.use('/api/service-locator', serviceLocatorRoutes);
 
 app.get('/api/service-locator', async (req, res) => {
   console.log('🔍 Service locator:', req.query);
-  
+
   try {
     const { type, latitude, longitude, pincode, radius } = req.query;
 
     if (!process.env.GOOGLE_MAPS_API_KEY) {
-      return res.status(503).json({
-        success: false,
-        error: 'Google Maps API not configured'
-      });
+      return res.status(503).json({ success: false, error: 'Google Maps API not configured' });
     }
 
     let searchLocation = { lat: null, lng: null };
@@ -415,7 +294,7 @@ app.get('/api/service-locator', async (req, res) => {
       console.log(`📍 Geocoding: ${pincode}`);
       const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${pincode}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
       const geocodeResponse = await axios.get(geocodeUrl);
-      
+
       if (geocodeResponse.data.status === 'OK' && geocodeResponse.data.results.length > 0) {
         searchLocation = geocodeResponse.data.results[0].geometry.location;
         console.log(`✅ Location: ${searchLocation.lat}, ${searchLocation.lng}`);
@@ -442,7 +321,6 @@ app.get('/api/service-locator', async (req, res) => {
     const searchRadius = radius || 5000;
 
     const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation.lat},${searchLocation.lng}&radius=${searchRadius}&keyword=${encodeURIComponent(searchQuery)}&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-    
     const placesResponse = await axios.get(placesUrl);
 
     if (placesResponse.data.status !== 'OK' && placesResponse.data.status !== 'ZERO_RESULTS') {
@@ -492,7 +370,6 @@ app.get('/api/service-locator/place/:placeId', async (req, res) => {
     }
 
     const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,formatted_phone_number,website,opening_hours,rating,user_ratings_total,reviews,photos,geometry&key=${process.env.GOOGLE_MAPS_API_KEY}`;
-    
     const response = await axios.get(detailsUrl);
 
     if (response.data.status !== 'OK') {
@@ -500,7 +377,7 @@ app.get('/api/service-locator/place/:placeId', async (req, res) => {
     }
 
     const place = response.data.result;
-    
+
     res.json({
       success: true,
       details: {
@@ -528,6 +405,16 @@ app.get('/api/service-locator/place/:placeId', async (req, res) => {
 console.log('✅ Service Locator routes registered\n');
 
 // ==================== PROTECTED ROUTES ====================
+const { protect } = require('./middleware/auth');
+const EquipmentHistory = require('./models/EquipmentHistory');
+const { validatePredictionInput } = require('./utils/validators');
+
+let mlPredictionController;
+try {
+  mlPredictionController = require('./controllers/mlPrediction');
+} catch (error) {
+  logSanitizer.warn('⚠️  ML controller not found:', error.message);
+}
 
 app.post('/api/predict', protect, async (req, res) => {
   try {
@@ -574,13 +461,12 @@ app.post('/api/predict', protect, async (req, res) => {
         });
         await history.save();
         console.log(`💾 Saved`);
-      } catch (dbError) {
+      } catch {
         console.log('⚠️  DB save failed');
       }
     }
 
     res.json({ success: true, prediction, timestamp: new Date().toISOString() });
-
   } catch (error) {
     console.error('❌ Prediction error:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -591,7 +477,7 @@ app.get('/api/history', protect, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const query = { user: req.user._id };
-    
+
     if (req.query.equipmentType) query.equipmentType = req.query.equipmentType;
     if (req.query.riskLevel) query['prediction.risk_level'] = req.query.riskLevel;
 
@@ -611,13 +497,10 @@ app.get('/api/history/:id', protect, async (req, res) => {
     if (!global.dbConnected) {
       return res.status(503).json({ success: false, error: 'DB not connected' });
     }
-    
     const history = await EquipmentHistory.findOne({ _id: req.params.id, user: req.user._id });
-    
     if (!history) {
       return res.status(404).json({ success: false, error: 'Not found' });
     }
-    
     res.json({ success: true, history });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -629,13 +512,10 @@ app.delete('/api/history/:id', protect, async (req, res) => {
     if (!global.dbConnected) {
       return res.status(503).json({ success: false, error: 'DB not connected' });
     }
-    
     const result = await EquipmentHistory.findOneAndDelete({ _id: req.params.id, user: req.user._id });
-    
     if (!result) {
       return res.status(404).json({ success: false, error: 'Not found' });
     }
-    
     console.log(`🗑️  Deleted: ${req.params.id}`);
     res.json({ success: true, message: 'Deleted' });
   } catch (error) {
@@ -648,10 +528,8 @@ app.delete('/api/history', protect, async (req, res) => {
     if (!global.dbConnected) {
       return res.status(503).json({ success: false, error: 'DB not connected' });
     }
-    
     const result = await EquipmentHistory.deleteMany({ user: req.user._id });
     console.log(`🗑️  Cleared ${result.deletedCount} entries`);
-    
     res.json({ success: true, message: `Deleted ${result.deletedCount}`, deletedCount: result.deletedCount });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -674,8 +552,10 @@ app.get('/api/stats', protect, async (req, res) => {
       });
     }
 
+    const EquipmentHistory = require('./models/EquipmentHistory');
+
     const totalAnalyses = await EquipmentHistory.countDocuments({ user: req.user._id });
-    
+
     const equipmentTypes = await EquipmentHistory.aggregate([
       { $match: { user: req.user._id } },
       { $group: { _id: '$equipmentType', count: { $sum: 1 } } }
@@ -724,7 +604,6 @@ app.get('/api/stats', protect, async (req, res) => {
 });
 
 // ==================== ERROR HANDLERS ====================
-
 app.use((req, res) => {
   console.log(`❌ 404: ${req.method} ${req.path}`);
   res.status(404).json({
@@ -744,17 +623,16 @@ app.use((err, req, res, next) => {
 });
 
 // ==================== SERVER STARTUP ====================
-
 const startServer = async () => {
   try {
     console.log('\n🚀 Starting Equipment Health Monitor...\n');
-    
+
     await connectDB();
-    const emailReady = await emailServiceWrapper.initialize();
+    await gmailService.initialize();
+    await gmailService.verify();
 
     app.listen(PORT, '0.0.0.0', () => {
       const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
-      
       console.log('═'.repeat(70));
       console.log('  🤖 AI EQUIPMENT HEALTH MONITOR');
       console.log('═'.repeat(70));
@@ -762,26 +640,11 @@ const startServer = async () => {
       console.log(`🔗 Backend:    ${backendUrl}`);
       console.log(`🌐 Frontend:   ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
       console.log(`🗄️  Database:   ${global.dbConnected ? '✅ Connected' : '⚠️  Disconnected'}`);
-      console.log(`📧 Email:      ${emailReady ? '✅ Ready' : '⚠️  Not Configured (Auto-verify enabled)'}`);
-      const emailStatus = emailServiceWrapper.getStatus();
-      console.log(`   Provider:   ${emailStatus.primaryProvider}`);
+      const emailStatus = gmailService.getStatus();
+      console.log(`📧 Email:      ${emailStatus.initialized ? '✅ Ready (Gmail API)' : '⚠️  Not Configured'}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log('═'.repeat(70));
-      console.log('📍 Routes Registered:');
-      console.log('   GET  /                                ✅');
-      console.log('   GET  /health                          ✅');
-      console.log('   GET  /api/email/status                ✅');
-      console.log('   GET  /auth/gmail/status               ✅');
-      console.log('   POST /api/auth/register               ✅');
-      console.log('   POST /api/auth/login                  ✅');
-      console.log('   POST /api/predict                     ✅');
-      console.log('   GET  /api/history                     ✅');
-      console.log('   GET  /api/stats                       ✅');
-      console.log('   GET  /api/service-locator             ✅');
-      console.log('   GET  /api/service-locator/place/:id   ✅');
       console.log('═'.repeat(70) + '\n');
     });
-
   } catch (error) {
     console.error('❌ Startup failed:', error);
     process.exit(1);
@@ -789,7 +652,6 @@ const startServer = async () => {
 };
 
 // ==================== GRACEFUL SHUTDOWN ====================
-
 process.on('SIGTERM', () => {
   console.log('\nSIGTERM - shutting down...');
   process.exit(0);

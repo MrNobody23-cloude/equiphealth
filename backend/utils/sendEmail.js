@@ -1,8 +1,9 @@
 // backend/utils/sendEmail.js
-// Sends via Gmail API (OAuth2). SMTP fallback can be enabled with ENABLE_SMTP_FALLBACK=true.
-
 const gmailService = require('../config/gmail');
 
+/**
+ * Send email via Gmail API (OAuth2). Never throws; returns { success, provider, messageId, error }.
+ */
 const sendEmail = async (options) => {
   try {
     console.log('\n📧 Email Request:');
