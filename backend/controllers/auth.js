@@ -3,15 +3,48 @@ const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const sendEmail = require('../utils/sendEmail');
-const { 
-  getVerificationEmailTemplate, 
+const {
+  getVerificationEmailTemplate,
   getWelcomeEmailTemplate,
-  getPasswordResetEmailTemplate 
+  getPasswordResetEmailTemplate
 } = require('../utils/emailTemplates');
 
 const googleClient = process.env.GOOGLE_CLIENT_ID
   ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
   : null;
+
+// Helpers
+const getFrontendUrl = () => process.env.FRONTEND_URL || 'http://localhost:5173';
+const getOAuthSuccessRedirect = () => process.env.OAUTH_SUCCESS_REDIRECT || '/dashboard';
+const useQueryToken = () => (process.env.OAUTH_TOKEN_IN_QUERY || 'false').toLowerCase() === 'true';
+
+function sanitizeRedirectPath(path) {
+  // Only allow local paths like "/dashboard" or "/welcome"
+  if (typeof path !== 'string') return '';
+  try {
+    const trimmed = path.trim();
+    if (!trimmed.startsWith('/')) return '';
+    // Disallow protocol or slashes that could indicate external redirect
+    if (trimmed.startsWith('//') || trimmed.includes('://')) return '';
+    return trimmed;
+  } catch {
+    return '';
+  }
+}
+
+function buildRedirectUrl(token, statePath) {
+  const frontendUrl = getFrontendUrl();
+  const defaultPath = getOAuthSuccessRedirect();
+  const safePath = sanitizeRedirectPath(statePath) || defaultPath;
+  if (useQueryToken()) {
+    // Put token in query: ?token=...
+    return `${frontendUrl}${safePath}?token=${token}`;
+  }
+  // Put token in hash: #token=...
+  return `${frontendUrl}${safePath}#token=${token}`;
+}
+
+// ==================== LOCAL AUTH (EMAIL/PASSWORD) ====================
 
 // Register (email verification required for local provider)
 exports.register = async (req, res) => {
@@ -52,7 +85,7 @@ exports.register = async (req, res) => {
     const verificationToken = user.getEmailVerificationToken();
     await user.save();
 
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+    const verificationUrl = `${getFrontendUrl()}/verify-email/${verificationToken}`;
 
     const emailResult = await sendEmail({
       email: user.email,
@@ -99,7 +132,7 @@ exports.resendVerification = async (req, res) => {
     const verificationToken = user.getEmailVerificationToken();
     await user.save();
 
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+    const verificationUrl = `${getFrontendUrl()}/verify-email/${verificationToken}`;
     const emailResult = await sendEmail({
       email: user.email,
       subject: 'Verify Your Email - Equipment Health Monitor',
@@ -141,7 +174,13 @@ exports.login = async (req, res) => {
       return res.status(403).json({ success: false, error: 'Your account is not active. Please contact support.' });
     }
 
-    await user.updateLastLogin();
+    if (typeof user.updateLastLogin === 'function') {
+      await user.updateLastLogin();
+    } else {
+      user.lastLogin = new Date();
+      await user.save({ validateBeforeSave: false });
+    }
+
     const token = user.getSignedJwtToken();
 
     return res.status(200).json({
@@ -184,36 +223,6 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
-// Redirect to frontend Dashboard after successful Google OAuth
-exports.googleOAuthCallbackRedirect = async (req, res) => {
-  try {
-    // User was attached by passport.authenticate('google', ...)
-    const user = req.user;
-    if (!user) {
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      return res.redirect(`${frontendUrl}/login?error=google_auth_failed`);
-    }
-
-    await user.updateLastLogin();
-    const token = user.getSignedJwtToken();
-
-    // Build redirect URL
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const redirectPath = process.env.OAUTH_SUCCESS_REDIRECT || '/dashboard';
-
-    // Prefer hash to avoid token appearing in Referer headers
-    const putTokenInQuery = (process.env.OAUTH_TOKEN_IN_QUERY || 'false').toLowerCase() === 'true';
-    const redirectUrl = putTokenInQuery
-      ? `${frontendUrl}${redirectPath}?token=${token}`
-      : `${frontendUrl}${redirectPath}#token=${token}`;
-
-    return res.redirect(redirectUrl);
-  } catch (error) {
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('google_signin_failed')}`);
-  }
-};
-
 // Forgot password (local only)
 exports.forgotPassword = async (req, res) => {
   try {
@@ -223,7 +232,7 @@ exports.forgotPassword = async (req, res) => {
     const resetToken = user.getResetPasswordToken();
     await user.save();
 
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+    const resetUrl = `${getFrontendUrl()}/reset-password/${resetToken}`;
     const emailResult = await sendEmail({
       email: user.email,
       subject: 'Password Reset Request',
@@ -244,7 +253,7 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// Reset password (THIS WAS MISSING EARLIER)
+// Reset password
 exports.resetPassword = async (req, res) => {
   try {
     const resetPasswordToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
@@ -316,13 +325,21 @@ exports.cleanupUnverifiedUsers = async (req, res) => {
   }
 };
 
-// Google OAuth server-side success handler
+// ==================== GOOGLE AUTH ====================
+
+// Google OAuth server-side success handler (returns JSON)
 exports.googleOAuthSuccess = async (req, res) => {
   try {
     const user = req.user;
     if (!user) return res.status(401).json({ success: false, error: 'Google authentication failed' });
 
-    await user.updateLastLogin();
+    if (typeof user.updateLastLogin === 'function') {
+      await user.updateLastLogin();
+    } else {
+      user.lastLogin = new Date();
+      await user.save({ validateBeforeSave: false });
+    }
+
     const token = user.getSignedJwtToken();
 
     return res.status(200).json({
@@ -334,6 +351,33 @@ exports.googleOAuthSuccess = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Error finalizing Google sign-in' });
+  }
+};
+
+// Google OAuth server-side success handler (redirects to frontend)
+exports.googleOAuthCallbackRedirect = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.redirect(`${getFrontendUrl()}/login?error=google_auth_failed`);
+    }
+
+    if (typeof user.updateLastLogin === 'function') {
+      await user.updateLastLogin();
+    } else {
+      user.lastLogin = new Date();
+      await user.save({ validateBeforeSave: false });
+    }
+
+    const token = user.getSignedJwtToken();
+
+    // Google returns state in the callback query
+    const statePath = req.query.state || '';
+    const redirectUrl = buildRedirectUrl(token, statePath);
+
+    return res.redirect(redirectUrl);
+  } catch (error) {
+    return res.redirect(`${getFrontendUrl()}/login?error=${encodeURIComponent('google_signin_failed')}`);
   }
 };
 
@@ -353,7 +397,7 @@ exports.googleTokenSignIn = async (req, res) => {
     const email = payload.email;
     const emailVerified = payload.email_verified;
     const name = payload.name || 'Google User';
-    thePicture = payload.picture || null;
+    const picture = payload.picture || null;
     const googleSub = payload.sub;
 
     if (!email || !emailVerified) {
@@ -370,7 +414,7 @@ exports.googleTokenSignIn = async (req, res) => {
         password: randomPassword,
         provider: 'google',
         googleId: googleSub,
-        avatar: thePicture,
+        avatar: picture,
         emailVerified: true,
         accountStatus: 'active',
         isActive: true
@@ -378,14 +422,20 @@ exports.googleTokenSignIn = async (req, res) => {
     } else {
       user.provider = user.provider === 'local' ? 'local' : 'google';
       user.googleId = user.googleId || googleSub;
-      user.avatar = user.avatar || thePicture;
+      user.avatar = user.avatar || picture;
       user.emailVerified = true;
       user.accountStatus = 'active';
       user.isActive = true;
       await user.save({ validateBeforeSave: false });
     }
 
-    await user.updateLastLogin();
+    if (typeof user.updateLastLogin === 'function') {
+      await user.updateLastLogin();
+    } else {
+      user.lastLogin = new Date();
+      await user.save({ validateBeforeSave: false });
+    }
+
     const token = user.getSignedJwtToken();
 
     return res.status(200).json({
