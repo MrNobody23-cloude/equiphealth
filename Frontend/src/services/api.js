@@ -2,28 +2,25 @@
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
-// Write token to cookie as a fallback (readable by SPA)
 function setTokenCookie(token, maxAgeDays = 7) {
   try {
     const maxAge = maxAgeDays * 24 * 60 * 60;
-    // Secure cookie requires HTTPS (Render/Prod). SameSite=None for cross-site redirects.
     document.cookie = `token=${encodeURIComponent(token || '')}; Path=/; Max-Age=${maxAge}; Secure; SameSite=None`;
   } catch {}
 }
-
 function eraseTokenCookie() {
   try {
     document.cookie = 'token=; Path=/; Max-Age=0; Secure; SameSite=None';
   } catch {}
 }
 
-// Capture token from URL (query or hash) and store it
+// Capture token from URL (query or hash) on module load and store it
 export function captureTokenFromUrl(cleanUrl = true) {
   try {
     const url = new URL(window.location.href);
     let token = null;
 
-    // 1) Query: ?token=...
+    // Query: ?token=...
     if (url.searchParams.has('token')) {
       token = url.searchParams.get('token');
       if (cleanUrl) {
@@ -33,7 +30,7 @@ export function captureTokenFromUrl(cleanUrl = true) {
       }
     }
 
-    // 2) Hash: #token=...
+    // Hash: #token=...
     if (!token && url.hash && url.hash.startsWith('#')) {
       const hp = new URLSearchParams(url.hash.substring(1));
       token = hp.get('token');
@@ -53,21 +50,11 @@ export function captureTokenFromUrl(cleanUrl = true) {
   }
 }
 
-// Ensure we capture token ASAP when the module loads
+// Ensure token capture happens ASAP
 if (typeof window !== 'undefined') {
   captureTokenFromUrl(true);
 }
 
-// Helpers to manage token centrally
-export function setAuthToken(token) {
-  if (!token) {
-    localStorage.removeItem('token');
-    eraseTokenCookie();
-    return;
-  }
-  localStorage.setItem('token', token);
-  setTokenCookie(token);
-}
 export function getAuthToken() {
   return localStorage.getItem('token');
 }
@@ -76,9 +63,8 @@ export function clearAuthToken() {
   eraseTokenCookie();
 }
 
-// Safe JSON parse (handles empty body)
-async function safeJson(response) {
-  const text = await response.text();
+async function safeJson(res) {
+  const text = await res.text();
   if (!text) return {};
   try {
     return JSON.parse(text);
@@ -95,17 +81,17 @@ class ApiService {
   async request(endpoint, options = {}) {
     let url = `${this.baseURL}${endpoint}`;
 
-    // Handle query params
+    // Query params
     if (options.params) {
-      const queryString = new URLSearchParams(options.params).toString();
-      if (queryString) url += `?${queryString}`;
+      const qs = new URLSearchParams(options.params).toString();
+      if (qs) url += `?${qs}`;
       delete options.params;
     }
 
     const token = getAuthToken();
 
     // Build headers
-    const baseHeaders = {
+    const headers = {
       Accept: 'application/json',
       ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -114,33 +100,24 @@ class ApiService {
 
     const config = {
       method: options.method || 'GET',
-      credentials: 'include', // keep cookies (if backend uses them)
-      headers: baseHeaders,
+      credentials: 'include', // keep cookies if any
+      headers,
       body: options.body && !(options.body instanceof FormData) ? JSON.stringify(options.body) : options.body || undefined,
       signal: options.signal
     };
 
-    try {
-      const response = await fetch(url, config);
-      const data = await safeJson(response);
+    const res = await fetch(url, config);
+    const data = await safeJson(res);
 
-      if (!response.ok) {
-        // If unauthorized, clear token (so guards reroute cleanly)
-        if (response.status === 401 || response.status === 403) {
-          clearAuthToken();
-        }
-        const errMsg = data?.error || data?.message || `HTTP ${response.status}`;
-        const error = new Error(errMsg);
-        error.status = response.status;
-        error.data = data;
-        throw error;
-      }
-
-      return { data };
-    } catch (error) {
-      console.error('API Request Error:', error);
-      throw error;
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) clearAuthToken();
+      const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.data = data;
+      throw err;
     }
+
+    return { data };
   }
 
   get(endpoint, params = null) {

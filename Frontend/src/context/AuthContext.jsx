@@ -9,26 +9,10 @@ export const useAuth = () => {
   return ctx;
 };
 
-// Attach/remove token on axios
-function setAxiosAuthHeader(token) {
-  try {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    } else {
-      delete api.defaults.headers.common['Authorization'];
-    }
-  } catch {}
-}
-
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [initialized, setInitialized] = useState(false);
-
-  // Keep axios header in sync with token
-  useEffect(() => {
-    setAxiosAuthHeader(token);
-  }, [token]);
 
   // Hydrate on first load
   useEffect(() => {
@@ -57,27 +41,6 @@ export const AuthProvider = ({ children }) => {
     };
     boot();
   }, []);
-
-  const checkAuth = async () => {
-    const stored = localStorage.getItem('token');
-    if (!stored) {
-      setToken(null);
-      setUser(null);
-      return { authenticated: false };
-    }
-    try {
-      setToken(stored);
-      const res = await api.get('/auth/me');
-      if (res.data?.success) {
-        setUser(res.data.user);
-        return { authenticated: true, user: res.data.user };
-      }
-    } catch {}
-    localStorage.removeItem('token');
-    setToken(null);
-    setUser(null);
-    return { authenticated: false };
-  };
 
   const register = async (name, email, password) => {
     try {
@@ -125,7 +88,7 @@ export const AuthProvider = ({ children }) => {
     window.location.href = '/login';
   };
 
-  // Let OAuth callback push a token into context
+  // Allow OAuth callback to push token into context
   const applyToken = async (newToken) => {
     if (!newToken) return;
     localStorage.setItem('token', newToken);
@@ -136,18 +99,7 @@ export const AuthProvider = ({ children }) => {
     } catch {}
   };
 
-  const value = {
-    token,
-    user,
-    setUser,
-    initialized,
-    register,
-    login,
-    logout,
-    checkAuth,
-    applyToken,
-    setToken,
-  };
+  const value = { token, user, setUser, initialized, register, login, logout, applyToken, setToken };
 
   if (!initialized) {
     return (

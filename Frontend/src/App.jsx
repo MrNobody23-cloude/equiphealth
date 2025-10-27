@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
@@ -8,50 +8,18 @@ import VerifyEmail from './pages/VerifyEmail';
 import Dashboard from './components/Dashboard';
 import EquipmentMonitor from './components/EquipmentMonitor';
 import ServiceLocator from './components/ServiceLocator';
-import api from './services/api';
+import api, { captureTokenFromUrl } from './services/api';
 import './App.css';
 
-// Capture token BEFORE rendering AuthProvider/Routes
+// Capture token BEFORE rendering routes so PrivateRoute doesn't bounce
 function TokenBootstrap({ onReady }) {
   const location = useLocation();
 
-  const bootstrap = useCallback(() => {
-    try {
-      const url = new URL(window.location.href);
-      let token = null;
-
-      // Query
-      const qp = url.searchParams;
-      if (qp.has('token')) {
-        token = qp.get('token');
-        qp.delete('token');
-        const clean = url.pathname + (qp.toString() ? `?${qp.toString()}` : '');
-        window.history.replaceState(null, '', clean);
-      }
-
-      // Hash
-      if (!token && url.hash && url.hash.startsWith('#')) {
-        const hp = new URLSearchParams(url.hash.substring(1));
-        token = hp.get('token');
-        window.history.replaceState(null, '', url.pathname + url.search);
-      }
-
-      if (token) {
-        localStorage.setItem('token', token);
-        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      } else {
-        const existing = localStorage.getItem('token');
-        if (existing) {
-          api.defaults.headers.common['Authorization'] = `Bearer ${existing}`;
-        }
-      }
-    } catch {}
-
-    onReady(true);
-  }, [onReady]);
-
   useEffect(() => {
-    bootstrap();
+    try {
+      captureTokenFromUrl(true);
+    } catch {}
+    onReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location]);
 
@@ -84,6 +52,7 @@ function OAuthCallback() {
       if (!token) return navigate('/login', { replace: true });
 
       try {
+        // Store token and try to fetch user
         await applyToken(token);
         setStatus('success');
         setTimeout(() => navigate('/dashboard', { replace: true }), 300);
@@ -125,7 +94,7 @@ function OAuthCallback() {
   );
 }
 
-// Main app
+// Main app content (protected)
 function MainApp() {
   const [activeTab, setActiveTab] = useState('monitor');
   const [equipmentList, setEquipmentList] = useState([]);
@@ -269,7 +238,7 @@ function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/verify-email/:token" element={<VerifyEmail />} />
 
-            {/* OAuth callback */}
+            {/* OAuth callback (public) */}
             <Route path="/auth/callback" element={<OAuthCallback />} />
 
             {/* Protected */}

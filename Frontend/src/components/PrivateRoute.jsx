@@ -10,20 +10,18 @@ function getCookie(name) {
 export default function PrivateRoute({ children }) {
   const { token, initialized, setToken } = useAuth();
 
-  // Safety net: if token missing, try to hydrate from localStorage or cookie
+  // Safety net: if token missing, try hydrate from localStorage or cookie
   useEffect(() => {
-    if (!initialized) return;
-    if (!token) {
-      const stored = localStorage.getItem('token');
-      if (stored) {
-        setToken(stored);
-        return;
-      }
-      const cookieToken = getCookie('token');
-      if (cookieToken) {
-        localStorage.setItem('token', cookieToken);
-        setToken(cookieToken);
-      }
+    if (!initialized || token) return;
+    const stored = localStorage.getItem('token');
+    if (stored) {
+      setToken(stored);
+      return;
+    }
+    const cookieToken = getCookie('token');
+    if (cookieToken) {
+      localStorage.setItem('token', cookieToken);
+      setToken(cookieToken);
     }
   }, [initialized, token, setToken]);
 
