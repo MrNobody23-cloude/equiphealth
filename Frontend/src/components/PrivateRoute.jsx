@@ -12,11 +12,19 @@ export default function PrivateRoute({ children }) {
 
   useEffect(() => {
     if (!initialized || token) return;
+
+    const justLoggedOut = sessionStorage.getItem('justLoggedOut') === '1';
+    if (justLoggedOut) {
+      // Do not rehydrate from cookie right after logout
+      return;
+    }
+
     const stored = localStorage.getItem('token');
     if (stored) {
       setToken(stored);
       return;
     }
+
     const cookieToken = getCookie('token');
     if (cookieToken) {
       localStorage.setItem('token', cookieToken);
@@ -26,5 +34,6 @@ export default function PrivateRoute({ children }) {
 
   if (!initialized) return null;
   if (!token) return <Navigate to="/login" replace />;
+
   return children;
 }

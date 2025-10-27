@@ -8,6 +8,12 @@ export const useAuth = () => {
   return ctx;
 };
 
+function clearFrontTokenCookie() {
+  try {
+    document.cookie = 'token=; Path=/; Max-Age=0; Secure; SameSite=None';
+  } catch {}
+}
+
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
@@ -42,9 +48,7 @@ export const AuthProvider = ({ children }) => {
   const register = async (name, email, password) => {
     try {
       const res = await api.post('/auth/register', { name, email, password });
-      if (res.data.success) {
-        return { success: true, message: res.data.message || 'Registration successful! Please check your email.' };
-      }
+      if (res.data.success) return { success: true, message: res.data.message || 'Registration successful! Please check your email.' };
       return { success: false, error: res.data.error || 'Registration failed' };
     } catch (error) {
       return { success: false, error: error?.response?.data?.error || error.message || 'Registration failed' };
@@ -60,11 +64,7 @@ export const AuthProvider = ({ children }) => {
         setUser(res.data.user || null);
         return { success: true };
       }
-      return {
-        success: false,
-        error: res.data?.error || 'Invalid credentials',
-        emailNotVerified: res.data?.emailNotVerified || false
-      };
+      return { success: false, error: res.data?.error || 'Invalid credentials', emailNotVerified: res.data?.emailNotVerified || false };
     } catch (error) {
       const msg = error?.response?.data?.error || error.message || 'Login failed. Please try again.';
       const isUnverified = msg.toLowerCase().includes('verify your email');
@@ -73,10 +73,23 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    try { await api.post?.('/auth/logout').catch(() => {}); } catch {}
+    try {
+      // Tell the guard not to rehydrate from cookie this tick
+      sessionStorage.setItem('justLoggedOut', '1');
+
+      // Server-side logout (also clears API cookie)
+      await api.post?.('/auth/logout').catch(() => {});
+    } catch {}
+    // Clear client-side token sources
     localStorage.removeItem('token');
+    clearFrontTokenCookie();
+
     setToken(null);
     setUser(null);
+
+    // Clear the flag shortly after navigation
+    setTimeout(() => sessionStorage.removeItem('justLoggedOut'), 3000);
+
     window.location.href = '/login';
   };
 

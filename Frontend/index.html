@@ -3,14 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Capture token BEFORE React mounts -->
     <script>
       (function () {
         try {
           var url = new URL(window.location.href);
           var token = null;
 
-          // ?token=...
           if (url.searchParams.has('token')) {
             token = url.searchParams.get('token');
             url.searchParams.delete('token');
@@ -18,7 +16,6 @@
             window.history.replaceState(null, '', clean);
           }
 
-          // #token=...
           if (!token && url.hash && url.hash.startsWith('#')) {
             var hp = new URLSearchParams(url.hash.substring(1));
             token = hp.get('token');
@@ -27,12 +24,9 @@
 
           if (token) {
             localStorage.setItem('token', token);
-            // also set a readable cookie for safety
             document.cookie = 'token=' + encodeURIComponent(token) + '; Path=/; Max-Age=' + (7*24*60*60) + '; Secure; SameSite=None';
           }
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
       })();
     </script>
     <title>Equipment Health Monitor</title>
