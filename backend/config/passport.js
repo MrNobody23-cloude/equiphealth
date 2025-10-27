@@ -1,154 +1,86 @@
+// backend/config/passport.js
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const GitHubStrategy = require('passport-github2').Strategy;
-const crypto = require('crypto');
 const User = require('../models/User');
 
-// Serialize user for session
+// Serialize/deserialize for session (even if we return JWT, Passport needs these)
 passport.serializeUser((user, done) => {
   done(null, user.id);
 });
-
-// Deserialize user from session
 passport.deserializeUser(async (id, done) => {
   try {
     const user = await User.findById(id);
-    done(null, user);
+    done(null, user || null);
   } catch (err) {
     done(err, null);
   }
 });
 
-// Google OAuth Strategy
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-  // Build callback URL - MUST use HTTPS in production
-  const callbackURL = process.env.GOOGLE_CALLBACK_URL || 
-                      (process.env.NODE_ENV === 'production' 
-                        ? 'https://equiphealth.onrender.com/api/auth/google/callback'
-                        : 'http://localhost:5000/api/auth/google/callback');
+// Google OAuth Strategy (server-side flow)
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const GOOGLE_CALLBACK_URL =
+  process.env.GOOGLE_CALLBACK_URL ||
+  `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/auth/google/callback`;
 
-  console.log('━'.repeat(60));
-  console.log('🔐 Google OAuth Configuration:');
-  console.log('   Client ID:', process.env.GOOGLE_CLIENT_ID?.substring(0, 20) + '...');
-  console.log('   Callback URL:', callbackURL);
-  console.log('   Environment:', process.env.NODE_ENV);
-  console.log('━'.repeat(60));
-
+if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
   passport.use(
     new GoogleStrategy(
       {
-        clientID: process.env.GOOGLE_CLIENT_ID,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: callbackURL,
-        proxy: true,
-        scope: ['profile', 'email']
+        clientID: GOOGLE_CLIENT_ID,
+        clientSecret: GOOGLE_CLIENT_SECRET,
+        callbackURL: GOOGLE_CALLBACK_URL,
+        passReqToCallback: true
       },
-      async (accessToken, refreshToken, profile, done) => {
+      async (req, accessToken, refreshToken, profile, done) => {
         try {
-          console.log('✅ Google OAuth callback triggered');
-          console.log('📧 Email:', profile.emails[0].value);
-
-          let user = await User.findOne({ email: profile.emails[0].value });
-
-          if (user) {
-            console.log('👤 Existing user found');
-            await user.updateLastLogin();
-            return done(null, user);
-          }
-
-          console.log('✨ Creating new user');
-
-          user = await User.create({
-            name: profile.displayName,
-            email: profile.emails[0].value,
-            password: crypto.randomBytes(16).toString('hex') + 'Aa1!',
-            emailVerified: true,
-            provider: 'google',
-            providerId: profile.id,
-            avatar: profile.photos && profile.photos[0] ? profile.photos[0].value : null,
-            lastLogin: Date.now()
-          });
-
-          console.log('✅ User created:', user.email);
-          done(null, user);
-        } catch (err) {
-          console.error('❌ Google OAuth error:', err);
-          done(err, null);
-        }
-      }
-    )
-  );
-} else {
-  console.log('⚠️  Google OAuth not configured - missing credentials');
-}
-
-// GitHub OAuth Strategy
-if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
-  const callbackURL = process.env.GITHUB_CALLBACK_URL || 
-                      (process.env.NODE_ENV === 'production' 
-                        ? 'https://equiphealth.onrender.com/api/auth/github/callback'
-                        : 'http://localhost:5000/api/auth/github/callback');
-
-  console.log('━'.repeat(60));
-  console.log('🔐 GitHub OAuth Configuration:');
-  console.log('   Client ID:', process.env.GITHUB_CLIENT_ID?.substring(0, 20) + '...');
-  console.log('   Callback URL:', callbackURL);
-  console.log('━'.repeat(60));
-
-  passport.use(
-    new GitHubStrategy(
-      {
-        clientID: process.env.GITHUB_CLIENT_ID,
-        clientSecret: process.env.GITHUB_CLIENT_SECRET,
-        callbackURL: callbackURL,
-        scope: ['user:email'],
-        proxy: true
-      },
-      async (accessToken, refreshToken, profile, done) => {
-        try {
-          console.log('✅ GitHub OAuth callback triggered');
-
-          const email = profile.emails && profile.emails[0] ? profile.emails[0].value : null;
+          const googleId = profile.id;
+          const email = (profile.emails && profile.emails[0]?.value) || null;
+          const name = profile.displayName || 'Google User';
+          const avatar = (profile.photos && profile.photos[0]?.value) || null;
 
           if (!email) {
-            console.error('❌ No email in GitHub profile');
-            return done(new Error('No email found in GitHub profile'), null);
+            return done(new Error('Google profile did not return an email.'), null);
           }
 
-          console.log('📧 Email:', email);
+          let user = await User.findOne({ email: email.toLowerCase() });
 
-          let user = await User.findOne({ email });
+          if (!user) {
+            // Create new user with Google provider
+            const crypto = require('crypto');
+            const randomPassword = crypto.randomBytes(32).toString('hex');
 
-          if (user) {
-            console.log('👤 Existing user found');
-            await user.updateLastLogin();
-            return done(null, user);
+            user = await User.create({
+              name,
+              email: email.toLowerCase(),
+              password: randomPassword, // never used, but satisfies schema
+              provider: 'google',
+              googleId,
+              avatar,
+              emailVerified: true,
+              accountStatus: 'active',
+              isActive: true
+            });
+          } else {
+            // Update existing user to be Google-verified and active
+            user.provider = user.provider === 'local' ? 'local' : 'google';
+            user.googleId = user.googleId || googleId;
+            user.avatar = user.avatar || avatar;
+            user.emailVerified = true;
+            user.accountStatus = 'active';
+            user.isActive = true;
+            await user.save({ validateBeforeSave: false });
           }
 
-          console.log('✨ Creating new user');
-
-          user = await User.create({
-            name: profile.displayName || profile.username || 'GitHub User',
-            email: email,
-            password: crypto.randomBytes(16).toString('hex') + 'Aa1!',
-            emailVerified: true,
-            provider: 'github',
-            providerId: profile.id,
-            avatar: profile.photos && profile.photos[0] ? profile.photos[0].value : null,
-            lastLogin: Date.now()
-          });
-
-          console.log('✅ User created:', user.email);
-          done(null, user);
+          return done(null, user);
         } catch (err) {
-          console.error('❌ GitHub OAuth error:', err);
-          done(err, null);
+          return done(err, null);
         }
       }
     )
   );
 } else {
-  console.log('⚠️  GitHub OAuth not configured - missing credentials');
+  console.warn('⚠️  GOOGLE_CLIENT_ID/SECRET not set. Google OAuth disabled.');
 }
 
 module.exports = passport;
