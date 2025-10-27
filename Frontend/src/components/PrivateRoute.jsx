@@ -10,7 +10,6 @@ function getCookie(name) {
 export default function PrivateRoute({ children }) {
   const { token, initialized, setToken } = useAuth();
 
-  // Safety net: if token missing, try hydrate from localStorage or cookie
   useEffect(() => {
     if (!initialized || token) return;
     const stored = localStorage.getItem('token');
@@ -27,6 +26,5 @@ export default function PrivateRoute({ children }) {
 
   if (!initialized) return null;
   if (!token) return <Navigate to="/login" replace />;
-
   return children;
 }

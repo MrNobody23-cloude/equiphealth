@@ -2,7 +2,6 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../services/api';
 
 const AuthContext = createContext();
-
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
@@ -14,7 +13,6 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [initialized, setInitialized] = useState(false);
 
-  // Hydrate on first load
   useEffect(() => {
     const boot = async () => {
       const stored = localStorage.getItem('token');
@@ -22,7 +20,6 @@ export const AuthProvider = ({ children }) => {
         setInitialized(true);
         return;
       }
-
       setToken(stored);
       try {
         const res = await api.get('/auth/me');
@@ -46,10 +43,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.post('/auth/register', { name, email, password });
       if (res.data.success) {
-        return {
-          success: true,
-          message: res.data.message || 'Registration successful! Please check your email.',
-        };
+        return { success: true, message: res.data.message || 'Registration successful! Please check your email.' };
       }
       return { success: false, error: res.data.error || 'Registration failed' };
     } catch (error) {
@@ -69,7 +63,7 @@ export const AuthProvider = ({ children }) => {
       return {
         success: false,
         error: res.data?.error || 'Invalid credentials',
-        emailNotVerified: res.data?.emailNotVerified || false,
+        emailNotVerified: res.data?.emailNotVerified || false
       };
     } catch (error) {
       const msg = error?.response?.data?.error || error.message || 'Login failed. Please try again.';
@@ -79,16 +73,13 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    try {
-      await api.post?.('/auth/logout').catch(() => {});
-    } catch {}
+    try { await api.post?.('/auth/logout').catch(() => {}); } catch {}
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
     window.location.href = '/login';
   };
 
-  // Allow OAuth callback to push token into context
   const applyToken = async (newToken) => {
     if (!newToken) return;
     localStorage.setItem('token', newToken);

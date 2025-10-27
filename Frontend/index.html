@@ -2,9 +2,40 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/Frontend/public/shinchan.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Equipment Health Monitoring System</title>
+    <!-- Capture token BEFORE React mounts -->
+    <script>
+      (function () {
+        try {
+          var url = new URL(window.location.href);
+          var token = null;
+
+          // ?token=...
+          if (url.searchParams.has('token')) {
+            token = url.searchParams.get('token');
+            url.searchParams.delete('token');
+            var clean = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '');
+            window.history.replaceState(null, '', clean);
+          }
+
+          // #token=...
+          if (!token && url.hash && url.hash.startsWith('#')) {
+            var hp = new URLSearchParams(url.hash.substring(1));
+            token = hp.get('token');
+            window.history.replaceState(null, '', url.pathname + url.search);
+          }
+
+          if (token) {
+            localStorage.setItem('token', token);
+            // also set a readable cookie for safety
+            document.cookie = 'token=' + encodeURIComponent(token) + '; Path=/; Max-Age=' + (7*24*60*60) + '; Secure; SameSite=None';
+          }
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
+    <title>Equipment Health Monitor</title>
   </head>
   <body>
     <div id="root"></div>
