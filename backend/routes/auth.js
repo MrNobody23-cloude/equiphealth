@@ -17,13 +17,22 @@ router.put('/reset-password/:token', authController.resetPassword);
 // Google OAuth (server-side redirect flow)
 router.get(
   '/google',
-  passport.authenticate('google', { scope: ['openid', 'email', 'profile'], prompt: 'select_account' })
+  (req, res, next) => {
+    // support passing a redirect path from frontend, optional
+    const state = req.query.state || '';
+    passport.authenticate('google', {
+      scope: ['openid', 'email', 'profile'],
+      prompt: 'select_account',
+      state
+    })(req, res, next);
+  }
 );
 
 router.get(
   '/google/callback',
   passport.authenticate('google', { session: false, failureRedirect: '/api/auth/google/failure' }),
-  authController.googleOAuthSuccess
+  // IMPORTANT: use the redirecting handler instead of returning JSON
+  authController.googleOAuthCallbackRedirect
 );
 
 router.get('/google/failure', (req, res) => {

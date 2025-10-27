@@ -184,6 +184,36 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
+// Redirect to frontend Dashboard after successful Google OAuth
+exports.googleOAuthCallbackRedirect = async (req, res) => {
+  try {
+    // User was attached by passport.authenticate('google', ...)
+    const user = req.user;
+    if (!user) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      return res.redirect(`${frontendUrl}/login?error=google_auth_failed`);
+    }
+
+    await user.updateLastLogin();
+    const token = user.getSignedJwtToken();
+
+    // Build redirect URL
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const redirectPath = process.env.OAUTH_SUCCESS_REDIRECT || '/dashboard';
+
+    // Prefer hash to avoid token appearing in Referer headers
+    const putTokenInQuery = (process.env.OAUTH_TOKEN_IN_QUERY || 'false').toLowerCase() === 'true';
+    const redirectUrl = putTokenInQuery
+      ? `${frontendUrl}${redirectPath}?token=${token}`
+      : `${frontendUrl}${redirectPath}#token=${token}`;
+
+    return res.redirect(redirectUrl);
+  } catch (error) {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    return res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('google_signin_failed')}`);
+  }
+};
+
 // Forgot password (local only)
 exports.forgotPassword = async (req, res) => {
   try {
