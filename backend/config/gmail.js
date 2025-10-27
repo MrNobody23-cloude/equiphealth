@@ -63,6 +63,7 @@ class GmailService {
 
       const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
       const { tokens } = await oauth2Client.getToken(code);
+
       return tokens;
     } catch (error) {
       console.error('❌ Error exchanging code for tokens:', error.message);
@@ -96,9 +97,10 @@ class GmailService {
       });
 
       // Ensure access token can be obtained
-      const at = await this.oauth2Client.getAccessToken();
-      const token = typeof at === 'string' ? at : at?.token;
-      if (!token) throw new Error('Failed to obtain Gmail access token. Re-authorize.');
+      const tokenResp = await this.oauth2Client.getAccessToken();
+      if (!tokenResp?.token) {
+        throw new Error('Failed to obtain Gmail access token. Re-authorize.');
+      }
 
       this.gmailApi = google.gmail({ version: 'v1', auth: this.oauth2Client });
       this.initialized = true;
@@ -248,7 +250,7 @@ class GmailService {
     }
   }
 
-  // Verify using OAuth2 userinfo (requires only userinfo.email)
+  // FIX: verify using OAuth2 userinfo (needs only userinfo.email) instead of Gmail getProfile
   async verify() {
     try {
       if (!this.initialized) {
@@ -257,7 +259,8 @@ class GmailService {
       }
 
       const oauth2 = google.oauth2({ version: 'v2', auth: this.oauth2Client });
-      const me = await oauth2.userinfo.get(); // requires userinfo.email scope
+      const me = await oauth2.userinfo.get(); // requires userinfo.email scope (we already request it)
+
       const addr = me?.data?.email || process.env.GMAIL_USER_EMAIL;
       console.log(`✅ Gmail OAuth2 verified for: ${addr}`);
       return true;
@@ -267,12 +270,11 @@ class GmailService {
     }
   }
 
+  // Helpful for debugging granted scopes
   async getGrantedScopes() {
     try {
       const at = await this.oauth2Client.getAccessToken();
-      const token = typeof at === 'string' ? at : at?.token;
-      if (!token) return [];
-      const info = await this.oauth2Client.getTokenInfo(token);
+      const info = await this.oauth2Client.getTokenInfo(at.token);
       return info?.scopes || [];
     } catch {
       return [];

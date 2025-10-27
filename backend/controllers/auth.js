@@ -8,7 +8,8 @@ const {
   getPasswordResetEmailTemplate 
 } = require('../utils/emailTemplates');
 
-// Register (email verification required)
+// Email verification is compulsory: if email fails, registration fails with 503.
+
 exports.register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -87,7 +88,6 @@ exports.register = async (req, res) => {
   }
 };
 
-// Resend verification
 exports.resendVerification = async (req, res) => {
   try {
     const { email } = req.body;
@@ -147,7 +147,6 @@ exports.resendVerification = async (req, res) => {
   }
 };
 
-// Login
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -200,7 +199,6 @@ exports.login = async (req, res) => {
   }
 };
 
-// Verify email
 exports.verifyEmail = async (req, res) => {
   try {
     const emailVerificationToken = crypto
@@ -223,7 +221,7 @@ exports.verifyEmail = async (req, res) => {
 
     await user.activateAccount();
 
-    // Non-blocking welcome email
+    // Fire-and-forget welcome email (non-critical)
     sendEmail({
       email: user.email,
       subject: 'Welcome to Equipment Health Monitor!',
@@ -253,7 +251,6 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
-// Forgot password
 exports.forgotPassword = async (req, res) => {
   try {
     const user = await User.findOne({ 
@@ -295,7 +292,44 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// Get current user
+exports.resetPassword = async (req, res) => {
+  try {
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired reset token'
+      });
+    }
+
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    const token = user.getSignedJwtToken();
+
+    return res.status(200).json({
+      success: true,
+      token,
+      message: 'Password reset successful'
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({ success: false, error: 'Error in password reset process' });
+  }
+};
+
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -319,21 +353,20 @@ exports.getMe = async (req, res) => {
   }
 };
 
-// Logout
 exports.logout = async (req, res) => {
   try {
+    // If using passport sessions
     if (typeof req.logout === 'function') {
       req.logout((err) => {
         if (err) console.warn('Logout callback error:', err);
       });
     }
     res.status(200).json({ success: true, message: 'Logged out successfully' });
-  } catch {
+  } catch (err) {
     res.status(200).json({ success: true, message: 'Logged out successfully' });
   }
 };
 
-// Cleanup unverified users (>24h)
 exports.cleanupUnverifiedUsers = async (req, res) => {
   try {
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
