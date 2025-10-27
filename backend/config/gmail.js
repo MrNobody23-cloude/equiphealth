@@ -5,8 +5,9 @@ const nodemailer = require('nodemailer');
 class GmailService {
   constructor() {
     this.oauth2Client = null;
-    this.initialized = false;
     this.gmailApi = null;
+    this.initialized = false;
+    // Disable SMTP fallback by default to avoid transporter timeouts on cloud
     this.smtpEnabled = (process.env.ENABLE_SMTP_FALLBACK || 'false').toLowerCase() === 'true';
   }
 
@@ -95,7 +96,7 @@ class GmailService {
         refresh_token: GMAIL_REFRESH_TOKEN
       });
 
-      // Test access token retrieval
+      // Ensure access token can be obtained
       const tokenResp = await this.oauth2Client.getAccessToken();
       if (!tokenResp?.token) {
         throw new Error('Failed to obtain Gmail access token. Re-authorize.');
@@ -177,17 +178,15 @@ class GmailService {
       const msg = error?.response?.data?.error?.message || error.message;
       console.error('❌ Gmail API send failed:', msg);
 
-      // Common token issues
-      if (msg.includes('invalid_grant') || msg.includes('Token has been expired') || msg.includes('invalid_token')) {
+      if (msg.includes('invalid_grant') || msg.includes('expired') || msg.includes('invalid_token')) {
         throw new Error('Gmail refresh token invalid or expired. Re-authorize at /auth/gmail/authorize');
       }
 
-      // Network/transient errors should bubble to controller as failure
       throw new Error(`Gmail API error: ${msg}`);
     }
   }
 
-  // Optional: SMTP fallback using App Password (disabled by default)
+  // Optional: SMTP fallback via App Password (disabled unless ENABLE_SMTP_FALLBACK=true)
   async sendViaSmtp({ email, subject, html, text }) {
     if (!this.smtpEnabled) {
       throw new Error('SMTP fallback disabled');
@@ -209,7 +208,7 @@ class GmailService {
       host,
       port,
       secure,
-      auth: { user, pass }, // Use Gmail App Password
+      auth: { user, pass },
       connectionTimeout: 15000,
       greetingTimeout: 10000,
       socketTimeout: 15000,
@@ -234,13 +233,11 @@ class GmailService {
     }
   }
 
-  // Public method used by app
+  // Public send - Gmail API first, optional SMTP fallback
   async sendEmail({ email, subject, html, text }) {
-    // Try Gmail API first (HTTPS)
     try {
       return await this.sendViaApi({ email, subject, html, text });
     } catch (apiErr) {
-      // If SMTP fallback is enabled, try it; otherwise fail
       if (this.smtpEnabled) {
         console.warn('⚠️  Falling back to Gmail SMTP (App Password)...');
         try {
@@ -253,45 +250,34 @@ class GmailService {
     }
   }
 
-  async sendTestEmail(recipientEmail) {
-    const { name: fromName, email: fromEmail } = this.getFrom();
-
-    const testHtml = `
-      <!DOCTYPE html>
-      <html>
-        <head><meta charset="UTF-8"></head>
-        <body style="font-family: Arial, sans-serif;">
-          <h2>✅ Gmail API Test</h2>
-          <p>This is a test email from <strong>${fromName}</strong> (${fromEmail}).</p>
-          <ul>
-            <li>Provider: Gmail API</li>
-            <li>Time: ${new Date().toLocaleString()}</li>
-            <li>Environment: ${process.env.NODE_ENV || 'development'}</li>
-          </ul>
-        </body>
-      </html>
-    `;
-
-    return await this.sendEmail({
-      email: recipientEmail,
-      subject: '✅ Gmail API Test - Equipment Health Monitor',
-      html: testHtml
-    });
-  }
-
+  // FIX: verify using OAuth2 userinfo (needs only userinfo.email) instead of Gmail getProfile
   async verify() {
     try {
       if (!this.initialized) {
         const ok = await this.initialize();
         if (!ok) return false;
       }
-      const res = await this.gmailApi.users.getProfile({ userId: 'me' });
-      const emailAddress = res?.data?.emailAddress;
-      console.log(`✅ Gmail API verified for: ${emailAddress || process.env.GMAIL_USER_EMAIL}`);
+
+      const oauth2 = google.oauth2({ version: 'v2', auth: this.oauth2Client });
+      const me = await oauth2.userinfo.get(); // requires userinfo.email scope (we already request it)
+
+      const addr = me?.data?.email || process.env.GMAIL_USER_EMAIL;
+      console.log(`✅ Gmail OAuth2 verified for: ${addr}`);
       return true;
     } catch (error) {
       console.error('❌ Gmail verification failed:', error.message);
       return false;
+    }
+  }
+
+  // Helpful for debugging granted scopes
+  async getGrantedScopes() {
+    try {
+      const at = await this.oauth2Client.getAccessToken();
+      const info = await this.oauth2Client.getTokenInfo(at.token);
+      return info?.scopes || [];
+    } catch {
+      return [];
     }
   }
 
