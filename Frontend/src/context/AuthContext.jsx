@@ -4,153 +4,170 @@ import api from '../services/api';
 const AuthContext = createContext();
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 };
 
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+// Helper to keep axios in sync
+function setAxiosAuthHeader(token) {
+  try {
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    } else {
+      delete api.defaults.headers.common['Authorization'];
+    }
+  } catch {}
+}
 
+export const AuthProvider = ({ children }) => {
+  const [token, setToken] = useState(null);
+  const [user, setUser] = useState(null);
+  const [initialized, setInitialized] = useState(false);
+
+  // Hydrate auth from localStorage on first load
   useEffect(() => {
-    checkAuth();
+    const boot = async () => {
+      const stored = localStorage.getItem('token');
+      if (!stored) {
+        setAxiosAuthHeader(null);
+        setInitialized(true);
+        return;
+      }
+
+      // Set token and axios header, then fetch profile (non-blocking for routing)
+      setToken(stored);
+      setAxiosAuthHeader(stored);
+
+      try {
+        const res = await api.get('/auth/me');
+        if (res.data?.success) {
+          setUser(res.data.user);
+        } else {
+          // Invalid token
+          localStorage.removeItem('token');
+          setToken(null);
+          setAxiosAuthHeader(null);
+        }
+      } catch {
+        localStorage.removeItem('token');
+        setToken(null);
+        setAxiosAuthHeader(null);
+      } finally {
+        // Allow routes to render after initial attempt
+        setInitialized(true);
+      }
+    };
+    boot();
   }, []);
 
+  // Public method to force re-check (optional)
   const checkAuth = async () => {
-    const token = localStorage.getItem('token');
-    
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const response = await api.get('/auth/me');
-      
-      if (response.data.success && response.data.user) {
-        setUser(response.data.user);
-      } else {
-        localStorage.removeItem('token');
-        setUser(null);
-      }
-    } catch (error) {
-      console.error('Auth check failed:', error);
-      localStorage.removeItem('token');
+    const stored = localStorage.getItem('token');
+    if (!stored) {
+      setToken(null);
       setUser(null);
-    } finally {
-      setLoading(false);
+      setAxiosAuthHeader(null);
+      return { authenticated: false };
     }
+    try {
+      setToken(stored);
+      setAxiosAuthHeader(stored);
+      const res = await api.get('/auth/me');
+      if (res.data?.success) {
+        setUser(res.data.user);
+        return { authenticated: true, user: res.data.user };
+      }
+    } catch {}
+    localStorage.removeItem('token');
+    setToken(null);
+    setUser(null);
+    setAxiosAuthHeader(null);
+    return { authenticated: false };
   };
 
   const register = async (name, email, password) => {
     try {
-      const response = await api.post('/auth/register', {
-        name,
-        email,
-        password
-      });
-
-      if (response.data.success) {
+      const res = await api.post('/auth/register', { name, email, password });
+      if (res.data.success) {
         return {
           success: true,
-          message: response.data.message || 'Registration successful! Please check your email.'
-        };
-      } else {
-        return {
-          success: false,
-          error: response.data.error || 'Registration failed'
+          message: res.data.message || 'Registration successful! Please check your email.'
         };
       }
+      return { success: false, error: res.data.error || 'Registration failed' };
     } catch (error) {
-      console.error('Registration error:', error);
-      return {
-        success: false,
-        error: error.message || 'Registration failed. Please try again.'
-      };
+      return { success: false, error: error?.response?.data?.error || error.message || 'Registration failed' };
     }
   };
 
   const login = async (email, password) => {
     try {
-      const response = await api.post('/auth/login', {
-        email,
-        password
-      });
-
-      if (response.data.success && response.data.token) {
-        localStorage.setItem('token', response.data.token);
-        setUser(response.data.user);
+      const res = await api.post('/auth/login', { email, password });
+      if (res.data?.success && res.data.token) {
+        localStorage.setItem('token', res.data.token);
+        setToken(res.data.token);
+        setAxiosAuthHeader(res.data.token);
+        setUser(res.data.user || null);
         return { success: true };
-      } else {
-        return {
-          success: false,
-          error: response.data.error || 'Invalid credentials',
-          emailNotVerified: response.data.emailNotVerified || false
-        };
       }
-    } catch (error) {
-      console.error('Login error:', error);
-      
-      // Parse error response
-      if (error.message.includes('verify your email')) {
-        return {
-          success: false,
-          error: error.message,
-          emailNotVerified: true
-        };
-      }
-      
       return {
         success: false,
-        error: error.message || 'Login failed. Please try again.'
+        error: res.data?.error || 'Invalid credentials',
+        emailNotVerified: res.data?.emailNotVerified || false
       };
+    } catch (error) {
+      const msg = error?.response?.data?.error || error.message || 'Login failed. Please try again.';
+      const isUnverified = msg.toLowerCase().includes('verify your email');
+      return { success: false, error: msg, emailNotVerified: isUnverified };
     }
   };
 
   const logout = async () => {
     try {
-      await api.get('/auth/logout');
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      localStorage.removeItem('token');
-      setUser(null);
-      window.location.href = '/login';
-    }
+      // If you have a server-side logout route, call it; otherwise just clear storage
+      await api.post?.('/auth/logout').catch(() => {});
+    } catch {}
+    localStorage.removeItem('token');
+    setToken(null);
+    setAxiosAuthHeader(null);
+    setUser(null);
+    window.location.href = '/login';
+  };
+
+  // Allow setting token from OAuth callback easily
+  const applyToken = async (newToken) => {
+    if (!newToken) return;
+    localStorage.setItem('token', newToken);
+    setToken(newToken);
+    setAxiosAuthHeader(newToken);
+    try {
+      const res = await api.get('/auth/me');
+      if (res.data?.success) setUser(res.data.user);
+    } catch {}
   };
 
   const value = {
+    token,
     user,
     setUser,
-    loading,
+    initialized,
     register,
     login,
     logout,
-    checkAuth
+    checkAuth,
+    applyToken,
+    setToken // expose if needed by guards
   };
 
-  if (loading) {
+  if (!initialized) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        flexDirection: 'column',
-        gap: '20px'
-      }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: '20px' }}>
         <div className="loading-spinner-large"></div>
         <p>Loading...</p>
       </div>
     );
   }
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
