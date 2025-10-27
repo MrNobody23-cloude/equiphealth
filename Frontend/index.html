@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- 0) SAFEGUARD: define window.temperature if any code accidentally references it -->
+    <script>
+      (function () {
+        if (typeof window !== 'undefined' && typeof window.temperature === 'undefined') {
+          window.temperature = 0;
+        }
+      })();
+    </script>
+
+    <!-- 1) Capture OAuth token BEFORE React mounts -->
     <script>
       (function () {
         try {
@@ -29,6 +40,7 @@
         } catch (e) {}
       })();
     </script>
+
     <title>Equipment Health Monitor</title>
   </head>
   <body>

@@ -8,12 +8,6 @@ export const useAuth = () => {
   return ctx;
 };
 
-function clearFrontTokenCookie() {
-  try {
-    document.cookie = 'token=; Path=/; Max-Age=0; Secure; SameSite=None';
-  } catch {}
-}
-
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
@@ -28,7 +22,7 @@ export const AuthProvider = ({ children }) => {
       }
       setToken(stored);
       try {
-        const res = await api.get('/auth/me');
+        const res = await api.get('/auth/me', null, { timeout: 12000 });
         if (res.data?.success) {
           setUser(res.data.user);
         } else {
@@ -47,8 +41,10 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (name, email, password) => {
     try {
-      const res = await api.post('/auth/register', { name, email, password });
-      if (res.data.success) return { success: true, message: res.data.message || 'Registration successful! Please check your email.' };
+      const res = await api.post('/auth/register', { name, email, password }, { timeout: 20000 });
+      if (res.data.success) {
+        return { success: true, message: res.data.message || 'Registration successful! Please check your email.' };
+      }
       return { success: false, error: res.data.error || 'Registration failed' };
     } catch (error) {
       return { success: false, error: error?.response?.data?.error || error.message || 'Registration failed' };
@@ -57,7 +53,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const res = await api.post('/auth/login', { email, password });
+      const res = await api.post('/auth/login', { email, password }, { timeout: 12000 });
       if (res.data?.success && res.data.token) {
         localStorage.setItem('token', res.data.token);
         setToken(res.data.token);
@@ -73,23 +69,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    try {
-      // Tell the guard not to rehydrate from cookie this tick
-      sessionStorage.setItem('justLoggedOut', '1');
-
-      // Server-side logout (also clears API cookie)
-      await api.post?.('/auth/logout').catch(() => {});
-    } catch {}
-    // Clear client-side token sources
+    try { await api.post?.('/auth/logout').catch(() => {}); } catch {}
     localStorage.removeItem('token');
-    clearFrontTokenCookie();
-
     setToken(null);
     setUser(null);
-
-    // Clear the flag shortly after navigation
-    setTimeout(() => sessionStorage.removeItem('justLoggedOut'), 3000);
-
     window.location.href = '/login';
   };
 
@@ -98,7 +81,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
     try {
-      const res = await api.get('/auth/me');
+      const res = await api.get('/auth/me', null, { timeout: 10000 });
       if (res.data?.success) setUser(res.data.user);
     } catch {}
   };

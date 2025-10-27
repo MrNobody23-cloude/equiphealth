@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import './EquipmentMonitor.css';
-
 import api from '../services/api';
 
-function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipment, setSelectedEquipment, prefillData, setPrefillData }) {
+function EquipmentMonitor({
+  equipmentList,
+  refreshEquipmentList,
+  selectedEquipment,
+  setSelectedEquipment,
+  prefillData,
+  setPrefillData
+}) {
   const [equipmentType, setEquipmentType] = useState('laptop');
   const [equipmentName, setEquipmentName] = useState('');
   const [sensorData, setSensorData] = useState({
@@ -29,17 +35,23 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
   const [prediction, setPrediction] = useState(null);
   const [autoDetect, setAutoDetect] = useState(false);
   const [detectedValues, setDetectedValues] = useState(null);
-  
+
   const batteryHistoryRef = useRef([]);
   const batteryIntervalRef = useRef(null);
   const ambientLightSensorRef = useRef(null);
 
-  // Handle prefill data when adding readings for existing equipment
+  // Helper: safe numeric parse
+  const num = (v, d = 0) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : d;
+  };
+
+  // Handle prefill when adding readings for existing equipment
   useEffect(() => {
     if (prefillData) {
       setEquipmentName(prefillData.equipmentName);
       setEquipmentType(prefillData.equipmentType);
-      
+
       // Reset sensor data for new readings
       setSensorData({
         operating_hours: '',
@@ -60,35 +72,29 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
         efficiency_rating: ''
       });
 
-      // Clear prediction
       setPrediction(null);
-      
-      // Scroll to top
       window.scrollTo({ top: 0, behavior: 'smooth' });
-      
-      // Clear prefill data after using it
-      if (setPrefillData) {
-        setPrefillData(null);
-      }
 
+      if (setPrefillData) setPrefillData(null);
       alert(`📝 Adding new readings for: ${prefillData.equipmentName}`);
     }
   }, [prefillData, setPrefillData]);
 
   useEffect(() => {
-    if (autoDetect && (equipmentType === 'laptop' || equipmentType === 'phone' || equipmentType === 'tablet')) {
+    if (autoDetect && ['laptop', 'phone', 'tablet'].includes(equipmentType)) {
       detectSystemInfo();
     } else {
       cleanup();
     }
-
     return () => cleanup();
   }, [autoDetect, equipmentType]);
 
   const cleanup = () => {
     if (batteryIntervalRef.current) clearInterval(batteryIntervalRef.current);
     if (ambientLightSensorRef.current) {
-      try { ambientLightSensorRef.current.stop(); } catch (e) {}
+      try {
+        ambientLightSensorRef.current.stop();
+      } catch (e) {}
     }
   };
 
@@ -104,7 +110,6 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       cookieEnabled: navigator.cookieEnabled,
       onLine: navigator.onLine
     };
-
     setSystemInfo(info);
 
     const detected = {
@@ -116,11 +121,11 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       thermal: null
     };
 
-    // ==================== BATTERY (Real Data - Level Only) ====================
+    // Battery (level only)
     if ('getBattery' in navigator) {
       try {
         const battery = await navigator.getBattery();
-        
+
         detected.battery = {
           level: Math.round(battery.level * 100),
           charging: battery.charging,
@@ -130,11 +135,9 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
           canDetectHealth: false
         };
 
-        batteryHistoryRef.current = [{
-          level: battery.level,
-          timestamp: Date.now(),
-          charging: battery.charging
-        }];
+        batteryHistoryRef.current = [
+          { level: battery.level, timestamp: Date.now(), charging: battery.charging }
+        ];
 
         batteryIntervalRef.current = setInterval(async () => {
           const currentBattery = await navigator.getBattery();
@@ -158,14 +161,14 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       }
     }
 
-    // ==================== SCREEN BRIGHTNESS (Estimate) ====================
+    // Ambient light → approximate brightness
     if ('AmbientLightSensor' in window) {
       try {
         const sensor = new AmbientLightSensor({ frequency: 2 });
-        
+
         sensor.addEventListener('reading', () => {
           const lux = sensor.illuminance;
-          
+
           let estimate;
           if (lux < 1) estimate = 5;
           else if (lux < 10) estimate = 15;
@@ -198,14 +201,12 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
     if (!detected.brightness) {
       const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const hour = new Date().getHours();
-      
       let estimate = 50;
       if (hour >= 0 && hour < 6) estimate = 20;
       else if (hour >= 6 && hour < 9) estimate = 50;
       else if (hour >= 9 && hour < 17) estimate = 70;
       else if (hour >= 17 && hour < 20) estimate = 60;
       else if (hour >= 20 && hour < 24) estimate = 30;
-      
       if (isDark) estimate = Math.max(15, estimate - 15);
 
       detected.brightness = {
@@ -218,7 +219,7 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       };
     }
 
-    // ==================== RAM (Limited Browser Data) ====================
+    // RAM (limited)
     const totalRAM = navigator.deviceMemory || null;
     let heapUsed = 0;
     let heapLimit = 0;
@@ -231,16 +232,16 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
     if (totalRAM) {
       detected.ram = {
         totalRAM: totalRAM,
-        usableRAM: (totalRAM * 0.90).toFixed(1),
+        usableRAM: (totalRAM * 0.9).toFixed(1),
         heapUsed: parseFloat(heapUsed),
         heapLimit: parseFloat(heapLimit),
-        estimatedUsage: (totalRAM * 0.40).toFixed(2),
+        estimatedUsage: (totalRAM * 0.4).toFixed(2),
         isReal: false,
         note: 'Browser cannot access actual RAM usage - showing JS heap only'
       };
     }
 
-    // ==================== NETWORK (Real Data) ====================
+    // Network
     if ('connection' in navigator) {
       const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
       if (connection) {
@@ -258,11 +259,11 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       }
     }
 
-    // ==================== CPU (Benchmark Estimate) ====================
+    // CPU benchmark + thermal estimate
     try {
       const iterations = 500000;
       const benchmarks = [];
-      
+
       for (let i = 0; i < 5; i++) {
         const start = performance.now();
         let result = 0;
@@ -271,13 +272,13 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
         }
         const end = performance.now();
         benchmarks.push(end - start);
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise(r => setTimeout(r, 50));
       }
-      
+
       const avgTime = benchmarks.reduce((a, b) => a + b) / benchmarks.length;
       const baselineTime = 10;
       const cpuEstimate = Math.min(100, Math.max(0, (avgTime / baselineTime) * 30)).toFixed(1);
-      
+
       detected.cpu = {
         estimatedUsage: parseFloat(cpuEstimate),
         benchmarkTime: avgTime.toFixed(2),
@@ -287,7 +288,7 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
 
       const performanceDrop = ((benchmarks[4] - benchmarks[0]) / benchmarks[0]) * 100;
       const throttling = performanceDrop > 0 ? Math.min(100, Math.max(0, performanceDrop)).toFixed(1) : '0';
-      
+
       detected.thermal = {
         throttlingPercent: parseFloat(throttling),
         performanceDrop: performanceDrop.toFixed(2),
@@ -306,18 +307,14 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       timestamp: Date.now(),
       charging: battery.charging
     });
-
-    if (batteryHistoryRef.current.length > 10) {
-      batteryHistoryRef.current.shift();
-    }
-
+    if (batteryHistoryRef.current.length > 10) batteryHistoryRef.current.shift();
     updateBatteryData(battery, detected);
   };
 
   const updateBatteryData = (battery, detected) => {
     const batteryLevel = Math.round(battery.level * 100);
     const history = batteryHistoryRef.current;
-    
+
     let chargingTime = 'Calculating...';
     let dischargingTime = 'Calculating...';
 
@@ -326,10 +323,10 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
       const newest = history[history.length - 1];
       const timeDiff = (newest.timestamp - oldest.timestamp) / 1000;
       const levelDiff = newest.level - oldest.level;
-      
+
       if (timeDiff > 0 && Math.abs(levelDiff) > 0.001) {
         const ratePerSecond = levelDiff / timeDiff;
-        
+
         if (battery.charging) {
           const remaining = 1.0 - battery.level;
           if (ratePerSecond > 0) {
@@ -370,45 +367,56 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
   };
 
   const analyzeEquipment = async () => {
-  if (!equipmentName.trim()) {
-    alert('Please enter equipment name');
-    return;
-  }
-
-  setAnalyzing(true);
-  setPrediction(null);
-
-  const payload = {
-    equipmentName: equipmentName.trim(),
-    equipmentType: equipmentType,
-    temperature: parseFloat(temperature),
-    vibration: parseFloat(vibration),
-    pressure: parseFloat(pressure),
-    runtime: parseFloat(runtime),
-  };
-
-  try {
-    const response = await api.post('/predict', payload); // CHANGED
-
-    const result = response.data; // CHANGED
-
-    if (result.success) {
-      setPrediction(result.prediction);
-      
-      if (refreshEquipmentList) {
-        await refreshEquipmentList();
-      }
-      
-      alert('✅ Equipment analyzed successfully!');
-    } else {
-      alert('Error: ' + result.error);
+    if (!equipmentName.trim()) {
+      alert('Please enter equipment name');
+      return;
     }
-  } catch (e) {
-    console.log('Backend connection error:', e);
-    alert('❌ Failed to connect to backend.');
-  } finally {
-    setAnalyzing(false);
-  }
+
+    setAnalyzing(true);
+    setPrediction(null);
+
+    // Build payload exactly as backend expects
+    const payload = {
+      equipmentName: equipmentName.trim(),
+      equipment_type: equipmentType,
+      operating_hours: num(sensorData.operating_hours),
+      power_consumption: num(sensorData.power_consumption),
+      fan_speed: num(sensorData.fan_speed),
+      thermal_throttling: num(sensorData.thermal_throttling),
+      gpu_usage: num(sensorData.gpu_usage),
+      screen_brightness: num(sensorData.screen_brightness),
+      network_activity: num(sensorData.network_activity),
+      battery_health: num(sensorData.battery_health, 100),
+      cpu_usage: num(sensorData.cpu_usage),
+      ram_usage: num(sensorData.ram_usage),
+      load_percentage: num(sensorData.load_percentage),
+      noise_level: num(sensorData.noise_level),
+      rotation_speed: num(sensorData.rotation_speed),
+      current_draw: num(sensorData.current_draw),
+      oil_quality: num(sensorData.oil_quality, 100),
+      efficiency_rating: num(sensorData.efficiency_rating)
+    };
+
+    try {
+      // If your api service supports timeout options (from our improved version), you can do:
+      // const response = await api.post('/predict', payload, { timeout: 20000 });
+      const response = await api.post('/predict', payload);
+      const result = response.data;
+
+      if (result.success) {
+        setPrediction(result.prediction);
+        if (refreshEquipmentList) await refreshEquipmentList();
+        // optional: toast instead of alert
+        // alert('✅ Equipment analyzed successfully!');
+      } else {
+        alert('Error: ' + (result.error || 'Prediction failed'));
+      }
+    } catch (e) {
+      console.log('Backend connection error:', e);
+      alert('❌ Failed to connect to backend.');
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
   const getRiskColor = (risk) => {
@@ -438,8 +446,8 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
               { label: 'CPU, RAM, GPU', value: 'Task Manager (Ctrl+Shift+Esc) → Performance tab' },
               { label: 'Screen Brightness', value: 'Settings → System → Display → Brightness slider' },
               { label: 'Battery Health', value: 'Run: powercfg /batteryreport in Command Prompt, open generated HTML file' },
-              { label: 'Detailed Hardware', value: 'Download HWMonitor or HWiNFO for temperatures, fan speeds, voltages' },
-              { label: 'Thermal Data', value: 'Core Temp or Open Hardware Monitor for CPU/GPU temperatures' }
+              { label: 'Detailed Hardware', value: 'HWMonitor / HWiNFO for temps, fan speeds, voltages' },
+              { label: 'Thermal Data', value: 'Core Temp / Open Hardware Monitor for CPU/GPU temperatures' }
             ]
           },
           {
@@ -447,20 +455,20 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
             title: 'Mac Users',
             items: [
               { label: 'CPU & Memory', value: 'Activity Monitor → CPU/Memory tabs' },
-              { label: 'Screen Brightness', value: 'System Preferences → Displays → Brightness slider' },
+              { label: 'Screen Brightness', value: 'System Settings → Displays → Brightness' },
               { label: 'Battery Health', value: 'Option+Click battery icon in menu bar → Battery condition' },
-              { label: 'Detailed Monitoring', value: 'iStat Menus ($) or Intel Power Gadget (free) for comprehensive stats' },
-              { label: 'Power Usage', value: 'Activity Monitor → Energy tab shows app power consumption' }
+              { label: 'Detailed Monitoring', value: 'iStat Menus or Intel Power Gadget' },
+              { label: 'Power Usage', value: 'Activity Monitor → Energy tab' }
             ]
           },
           {
             icon: '🐧',
             title: 'Linux Users',
             items: [
-              { label: 'CPU Usage', value: 'Commands: top, htop, or glances' },
-              { label: 'RAM Usage', value: 'free -h or cat /proc/meminfo' },
-              { label: 'Battery Info', value: 'upower -i /org/freedesktop/UPower/devices/battery_BAT0' },
-              { label: 'Sensors', value: 'Install lm-sensors, run: sensors (shows temps, fan speeds)' },
+              { label: 'CPU Usage', value: 'top / htop / glances' },
+              { label: 'RAM Usage', value: 'free -h / cat /proc/meminfo' },
+              { label: 'Battery Info', value: 'upower -i battery device' },
+              { label: 'Sensors', value: 'lm-sensors: sensors' },
               { label: 'Brightness', value: 'xrandr --verbose or Settings → Displays' }
             ]
           }
@@ -474,32 +482,32 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
             icon: '📊',
             title: 'Direct Measurement Methods',
             items: [
-              { label: 'Operating Hours', value: 'Check equipment hour meter or control panel display' },
-              { label: 'Load Percentage', value: 'Read from PLC/SCADA system or equipment controller' },
-              { label: 'Rotation Speed', value: 'Use tachometer (contact or laser) pointed at shaft/belt' },
-              { label: 'Noise Level', value: 'Use sound level meter (dB meter) at 1 meter distance' },
-              { label: 'Current Draw', value: 'Clamp meter around power cable (measures amps)' }
+              { label: 'Operating Hours', value: 'Equipment hour meter / control panel' },
+              { label: 'Load Percentage', value: 'PLC/SCADA or controller readout' },
+              { label: 'Rotation Speed', value: 'Contact/laser tachometer' },
+              { label: 'Noise Level', value: 'Sound level meter (dB) at 1m' },
+              { label: 'Current Draw', value: 'Clamp meter on power cable' }
             ]
           },
           {
             icon: '🔧',
             title: 'Specialized Equipment',
             items: [
-              { label: 'Vibration Analysis', value: 'Vibration meter for bearing/alignment issues' },
-              { label: 'Oil Quality', value: 'Oil analysis kit or send sample to lab (check viscosity, contamination)' },
-              { label: 'Thermal Imaging', value: 'IR thermal camera to detect hot spots and overheating' },
-              { label: 'Power Analyzer', value: 'Power quality analyzer for efficiency, power factor' },
-              { label: 'Ultrasonic Testing', value: 'Detect air leaks, arcing, bearing failures' }
+              { label: 'Vibration Analysis', value: 'Vibration meter (bearings/alignment)' },
+              { label: 'Oil Quality', value: 'Oil analysis kit / lab (viscosity, contamination)' },
+              { label: 'Thermal Imaging', value: 'IR camera for hot spots' },
+              { label: 'Power Analyzer', value: 'Power quality analyzer' },
+              { label: 'Ultrasonic Testing', value: 'Leaks, arcing, bearing failures' }
             ]
           },
           {
             icon: '📱',
             title: 'IoT & SCADA Integration',
             items: [
-              { label: 'SCADA Systems', value: 'Connect to existing SCADA/DCS for real-time data' },
-              { label: 'IoT Sensors', value: 'Install wireless sensors for continuous monitoring' },
-              { label: 'Smart Controllers', value: 'Modern VFDs/PLCs often have built-in diagnostics' },
-              { label: 'Modbus/OPC', value: 'Read data directly from equipment via industrial protocols' }
+              { label: 'SCADA Systems', value: 'Connect existing SCADA/DCS' },
+              { label: 'IoT Sensors', value: 'Wireless sensors for continuous monitoring' },
+              { label: 'Smart Controllers', value: 'VFDs/PLCs diagnostics' },
+              { label: 'Modbus/OPC', value: 'Read data via industrial protocols' }
             ]
           }
         ]
@@ -510,13 +518,13 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
   };
 
   const deviceHelp = getDeviceSpecificHelp();
-    return (
+
+  return (
     <div className="equipment-monitor">
       <div className="monitor-grid">
         <div className="input-section">
           <h2 className="section-title">⚙️ Equipment Configuration</h2>
 
-          {/* Prefill Notification */}
           {equipmentName && equipmentType && (
             <div className="prefill-notification">
               ℹ️ Adding new readings for: <strong>{equipmentName}</strong> ({equipmentType})
@@ -525,7 +533,11 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
 
           <div className="form-group">
             <label>Equipment Type</label>
-            <select value={equipmentType} onChange={(e) => setEquipmentType(e.target.value)} className="form-select">
+            <select
+              value={equipmentType}
+              onChange={(e) => setEquipmentType(e.target.value)}
+              className="form-select"
+            >
               <option value="laptop">💻 Laptop</option>
               <option value="phone">📱 Phone</option>
               <option value="tablet">📱 Tablet</option>
@@ -549,10 +561,14 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
             />
           </div>
 
-          {(equipmentType === 'laptop' || equipmentType === 'phone' || equipmentType === 'tablet') && (
+          {['laptop', 'phone', 'tablet'].includes(equipmentType) && (
             <div className="form-group">
               <label className="checkbox-label">
-                <input type="checkbox" checked={autoDetect} onChange={(e) => setAutoDetect(e.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={autoDetect}
+                  onChange={(e) => setAutoDetect(e.target.checked)}
+                />
                 <span>🔍 Auto-detect available system information (for reference only)</span>
               </label>
             </div>
@@ -572,72 +588,166 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
               />
             </div>
 
-            {(equipmentType === 'industrial_machine' || equipmentType === 'motor' || equipmentType === 'pump' || equipmentType === 'compressor' || equipmentType === 'hvac') && (
+            {['industrial_machine', 'motor', 'pump', 'compressor', 'hvac'].includes(equipmentType) && (
               <>
                 <div className="form-group">
                   <label>📊 Load Percentage (%)</label>
-                  <input type="number" value={sensorData.load_percentage} onChange={(e) => handleInputChange('load_percentage', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.load_percentage}
+                    onChange={(e) => handleInputChange('load_percentage', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🔊 Noise Level (dB)</label>
-                  <input type="number" value={sensorData.noise_level} onChange={(e) => handleInputChange('noise_level', e.target.value)} placeholder="40-110" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.noise_level}
+                    onChange={(e) => handleInputChange('noise_level', e.target.value)}
+                    placeholder="40-110"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🔄 Rotation Speed (RPM)</label>
-                  <input type="number" value={sensorData.rotation_speed} onChange={(e) => handleInputChange('rotation_speed', e.target.value)} placeholder="0-6000" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.rotation_speed}
+                    onChange={(e) => handleInputChange('rotation_speed', e.target.value)}
+                    placeholder="0-6000"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>⚡ Current Draw (Amps)</label>
-                  <input type="number" value={sensorData.current_draw} onChange={(e) => handleInputChange('current_draw', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.current_draw}
+                    onChange={(e) => handleInputChange('current_draw', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🛢️ Oil Quality (%)</label>
-                  <input type="number" value={sensorData.oil_quality} onChange={(e) => handleInputChange('oil_quality', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.oil_quality}
+                    onChange={(e) => handleInputChange('oil_quality', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>⚡ Efficiency Rating (%)</label>
-                  <input type="number" value={sensorData.efficiency_rating} onChange={(e) => handleInputChange('efficiency_rating', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.efficiency_rating}
+                    onChange={(e) => handleInputChange('efficiency_rating', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
               </>
             )}
 
-            {(equipmentType === 'laptop' || equipmentType === 'phone' || equipmentType === 'tablet' || equipmentType === 'desktop') && (
+            {['laptop', 'phone', 'tablet', 'desktop'].includes(equipmentType) && (
               <>
                 <div className="form-group">
                   <label>💻 CPU Usage (%)</label>
-                  <input type="number" value={sensorData.cpu_usage} onChange={(e) => handleInputChange('cpu_usage', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.cpu_usage}
+                    onChange={(e) => handleInputChange('cpu_usage', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>💾 RAM Usage (GB)</label>
-                  <input type="number" step="0.01" value={sensorData.ram_usage} onChange={(e) => handleInputChange('ram_usage', e.target.value)} placeholder="0-32" className="form-input" />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={sensorData.ram_usage}
+                    onChange={(e) => handleInputChange('ram_usage', e.target.value)}
+                    placeholder="0-32"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🔋 Battery Health (%)</label>
-                  <input type="number" value={sensorData.battery_health} onChange={(e) => handleInputChange('battery_health', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.battery_health}
+                    onChange={(e) => handleInputChange('battery_health', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>⚡ Power Consumption (W)</label>
-                  <input type="number" value={sensorData.power_consumption} onChange={(e) => handleInputChange('power_consumption', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.power_consumption}
+                    onChange={(e) => handleInputChange('power_consumption', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🌀 Fan Speed (RPM)</label>
-                  <input type="number" value={sensorData.fan_speed} onChange={(e) => handleInputChange('fan_speed', e.target.value)} placeholder="0-5000" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.fan_speed}
+                    onChange={(e) => handleInputChange('fan_speed', e.target.value)}
+                    placeholder="0-5000"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🌡️ Thermal Throttling (%)</label>
-                  <input type="number" value={sensorData.thermal_throttling} onChange={(e) => handleInputChange('thermal_throttling', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.thermal_throttling}
+                    onChange={(e) => handleInputChange('thermal_throttling', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>🎮 GPU Usage (%)</label>
-                  <input type="number" value={sensorData.gpu_usage} onChange={(e) => handleInputChange('gpu_usage', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.gpu_usage}
+                    onChange={(e) => handleInputChange('gpu_usage', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
                   <label>☀️ Screen Brightness (%)</label>
-                  <input type="number" value={sensorData.screen_brightness} onChange={(e) => handleInputChange('screen_brightness', e.target.value)} placeholder="0-100" className="form-input" />
+                  <input
+                    type="number"
+                    value={sensorData.screen_brightness}
+                    onChange={(e) => handleInputChange('screen_brightness', e.target.value)}
+                    placeholder="0-100"
+                    className="form-input"
+                  />
                 </div>
                 <div className="form-group">
-                  <label>🌐 Network Activity (Mbps) {sensorData.network_activity && <span className="detected-badge real">✓ Auto</span>}</label>
-                  <input type="number" value={sensorData.network_activity} onChange={(e) => handleInputChange('network_activity', e.target.value)} placeholder="0-1000" className="form-input" />
+                  <label>
+                    🌐 Network Activity (Mbps){' '}
+                    {sensorData.network_activity && <span className="detected-badge real">✓ Auto</span>}
+                  </label>
+                  <input
+                    type="number"
+                    value={sensorData.network_activity}
+                    onChange={(e) => handleInputChange('network_activity', e.target.value)}
+                    placeholder="0-1000"
+                    className="form-input"
+                  />
                 </div>
               </>
             )}
@@ -649,12 +759,14 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
                 <h4>🔍 System Information (Reference Only)</h4>
                 <span className="info-badge">Auto-Detected</span>
               </div>
-              
+
               <div className="browser-limitation-notice">
                 <div className="notice-icon">⚠️</div>
                 <div className="notice-content">
                   <strong>Browser Security Limitations</strong>
-                  <p>For privacy and security, browsers cannot access most system values. Below shows what's available vs. what you need to enter manually.</p>
+                  <p>
+                    For privacy and security, browsers cannot access most system values. Below shows what's available vs. what you need to enter manually.
+                  </p>
                 </div>
               </div>
 
@@ -715,7 +827,10 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
                   </div>
                   <div className="card-note warning">
                     <span className="note-icon">⚠️</span>
-                    <span className="note-text"><strong>Battery Health cannot be detected by browsers.</strong> Please check your system settings to find actual battery health percentage.</span>
+                    <span className="note-text">
+                      <strong>Battery Health cannot be detected by browsers.</strong> Please check your system settings to find actual battery
+                      health percentage.
+                    </span>
                   </div>
                 </div>
               )}
@@ -882,7 +997,6 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
                 <h4>{deviceHelp.title}</h4>
                 <p>Follow these methods to get accurate sensor readings for your equipment:</p>
               </div>
-
               <div className="help-sections">
                 {deviceHelp.sections.map((section, idx) => (
                   <div key={idx} className="help-section">
@@ -924,16 +1038,21 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
             <>
               <h2 className="section-title">🤖 AI Health Analysis</h2>
               <div className="health-score-card">
-                <div className="score-circle" style={{
-                  background: `conic-gradient(${getHealthColor(prediction.health_score)} ${prediction.health_score * 3.6}deg, #334155 0deg)`
-                }}>
+                <div
+                  className="score-circle"
+                  style={{
+                    background: `conic-gradient(${getHealthColor(prediction.health_score)} ${
+                      prediction.health_score * 3.6
+                    }deg, #334155 0deg)`
+                  }}
+                >
                   <div className="score-inner">
                     <span className="score-value">{Math.round(prediction.health_score)}</span>
                     <span className="score-label">Health Score</span>
                   </div>
                 </div>
                 <div className="risk-badge" style={{ backgroundColor: getRiskColor(prediction.risk_level) }}>
-                  Risk Level: {prediction.risk_level.toUpperCase()}
+                  Risk Level: {prediction.risk_level?.toUpperCase?.() || 'N/A'}
                 </div>
               </div>
               <div className="metrics-grid">
@@ -952,17 +1071,19 @@ function EquipmentMonitor({ equipmentList, refreshEquipmentList, selectedEquipme
                   </div>
                 </div>
               </div>
-              <div className="recommendations">
-                <h3>💡 AI Recommendations</h3>
-                <ul className="recommendation-list">
-                  {prediction.recommendations.map((rec, index) => (
-                    <li key={index} className="recommendation-item">
-                      <span className="rec-icon">•</span>
-                      <span>{rec}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              {Array.isArray(prediction.recommendations) && (
+                <div className="recommendations">
+                  <h3>💡 AI Recommendations</h3>
+                  <ul className="recommendation-list">
+                    {prediction.recommendations.map((rec, index) => (
+                      <li key={index} className="recommendation-item">
+                        <span className="rec-icon">•</span>
+                        <span>{rec}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           ) : (
             <div className="empty-state">

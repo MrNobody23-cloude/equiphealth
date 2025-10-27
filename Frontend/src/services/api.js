@@ -9,9 +9,7 @@ function setTokenCookie(token, maxAgeDays = 7) {
   } catch {}
 }
 function eraseTokenCookie() {
-  try {
-    document.cookie = 'token=; Path=/; Max-Age=0; Secure; SameSite=None';
-  } catch {}
+  try { document.cookie = 'token=; Path=/; Max-Age=0; Secure; SameSite=None'; } catch {}
 }
 
 // Capture token from URL (query or hash) on module load and store it
@@ -98,44 +96,56 @@ class ApiService {
       ...(options.headers || {})
     };
 
+    // Timeout with AbortController
+    const timeoutMs = typeof options.timeout === 'number' ? options.timeout : 20000; // default 20s
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(new DOMException('Request timeout', 'AbortError')), timeoutMs);
+
     const config = {
       method: options.method || 'GET',
-      credentials: 'include', // keep cookies if any
+      credentials: 'include',
       headers,
       body: options.body && !(options.body instanceof FormData) ? JSON.stringify(options.body) : options.body || undefined,
-      signal: options.signal
+      signal: controller.signal
     };
 
-    const res = await fetch(url, config);
-    const data = await safeJson(res);
+    try {
+      const res = await fetch(url, config);
+      clearTimeout(timeoutId);
+      const data = await safeJson(res);
 
-    if (!res.ok) {
-      if (res.status === 401 || res.status === 403) clearAuthToken();
-      const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
-      err.status = res.status;
-      err.data = data;
-      throw err;
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) clearAuthToken();
+        const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+
+      return { data };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      console.error('API Request Error:', error);
+      throw error;
     }
-
-    return { data };
   }
 
-  get(endpoint, params = null) {
-    const options = { method: 'GET' };
+  get(endpoint, params = null, opts = {}) {
+    const options = { method: 'GET', ...opts };
     if (params) options.params = params;
     return this.request(endpoint, options);
   }
 
-  post(endpoint, body) {
-    return this.request(endpoint, { method: 'POST', body });
+  post(endpoint, body, opts = {}) {
+    return this.request(endpoint, { method: 'POST', body, ...opts });
   }
 
-  put(endpoint, body) {
-    return this.request(endpoint, { method: 'PUT', body });
+  put(endpoint, body, opts = {}) {
+    return this.request(endpoint, { method: 'PUT', body, ...opts });
   }
 
-  delete(endpoint) {
-    return this.request(endpoint, { method: 'DELETE' });
+  delete(endpoint, opts = {}) {
+    return this.request(endpoint, { method: 'DELETE', ...opts });
   }
 }
 
