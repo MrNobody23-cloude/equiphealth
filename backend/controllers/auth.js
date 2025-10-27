@@ -8,7 +8,7 @@ const {
   getPasswordResetEmailTemplate 
 } = require('../utils/emailTemplates');
 
-// Email verification is compulsory: if email fails to send, registration fails with 503.
+// Email verification is compulsory: if email fails, registration fails with 503.
 
 exports.register = async (req, res) => {
   try {
@@ -37,7 +37,6 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Create pending user
     const user = await User.create({
       name,
       email: email.toLowerCase(),
@@ -49,13 +48,11 @@ exports.register = async (req, res) => {
 
     console.log('✅ User created (pending verification):', user.email);
 
-    // Generate verification token
     const verificationToken = user.getEmailVerificationToken();
     await user.save();
 
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
 
-    // Attempt to send verification email via Gmail API
     const emailResult = await sendEmail({
       email: user.email,
       subject: 'Verify Your Email - Equipment Health Monitor',
@@ -64,15 +61,12 @@ exports.register = async (req, res) => {
 
     if (!emailResult.success) {
       console.warn(`❌ Verification email failed (${emailResult.provider}): ${emailResult.error}`);
-
-      // Delete pending user since verification email couldn't be sent
       try {
         await User.findByIdAndDelete(user._id);
         console.log('🗑️  Pending user removed due to email failure');
       } catch (delErr) {
         console.error('⚠️  Failed to delete pending user:', delErr.message);
       }
-
       return res.status(503).json({
         success: false,
         error: 'Unable to send verification email at the moment. Please try again later.',
@@ -298,6 +292,44 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
+exports.resetPassword = async (req, res) => {
+  try {
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.token)
+      .digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired reset token'
+      });
+    }
+
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    const token = user.getSignedJwtToken();
+
+    return res.status(200).json({
+      success: true,
+      token,
+      message: 'Password reset successful'
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    return res.status(500).json({ success: false, error: 'Error in password reset process' });
+  }
+};
+
 exports.getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -318,6 +350,20 @@ exports.getMe = async (req, res) => {
   } catch (error) {
     console.error('Get user error:', error);
     return res.status(500).json({ success: false, error: 'Error fetching user data' });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    // If using passport sessions
+    if (typeof req.logout === 'function') {
+      req.logout((err) => {
+        if (err) console.warn('Logout callback error:', err);
+      });
+    }
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
+  } catch (err) {
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
   }
 };
 
