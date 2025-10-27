@@ -1,15 +1,15 @@
-/**
- * Universal Email Service
- * Uses global email service wrapper initialized in server.js
- */
+// backend/utils/sendEmail.js
+// Uses Gmail API (OAuth2). SMTP fallback is disabled by default to avoid transporter/port timeouts.
+
+const gmailService = require('../config/gmail');
 
 /**
- * Send email using available provider
- * @param {Object} options - Email options
- * @param {string} options.email - Recipient email
- * @param {string} options.subject - Email subject
- * @param {string} options.html - HTML content
- * @param {string} options.text - Plain text content (optional)
+ * Send email using Gmail API (HTTPS). Never throws; returns { success, provider, messageId, error }.
+ * @param {Object} options
+ * @param {string} options.email
+ * @param {string} options.subject
+ * @param {string} options.html
+ * @param {string} [options.text]
  */
 const sendEmail = async (options) => {
   try {
@@ -17,54 +17,16 @@ const sendEmail = async (options) => {
     console.log(`   To: ${options.email}`);
     console.log(`   Subject: ${options.subject}`);
 
-    // Validate inputs
-    if (!options.email || !options.subject || !options.html) {
-      throw new Error('Missing required email fields (email, subject, html)');
+    if (!options?.email || !options?.subject || !options?.html) {
+      return { success: false, provider: 'gmail-api', error: 'Missing required email fields (email, subject, html)' };
     }
 
-    // Get email service from global
-    const emailService = global.emailService;
-    
-    if (!emailService) {
-      console.warn('⚠️  Email service not initialized');
-      return {
-        success: false,
-        error: 'Email service not initialized',
-        provider: 'none'
-      };
-    }
-
-    // Check if email service is configured
-    if (!emailService.isConfigured()) {
-      console.warn('⚠️  Email service not configured - email not sent');
-      return {
-        success: false,
-        error: 'Email service not configured',
-        provider: 'none',
-        autoVerify: true // Flag to auto-verify user
-      };
-    }
-
-    // Send email
-    const result = await emailService.sendEmail(options);
-    
-    if (result.success) {
-      console.log(`✅ Email sent successfully via ${result.provider}`);
-    } else {
-      console.warn(`⚠️  Email failed: ${result.error}`);
-    }
-
+    // Send via Gmail API (fallback to SMTP only if ENABLE_SMTP_FALLBACK=true)
+    const result = await gmailService.sendEmail(options);
     return result;
-
   } catch (error) {
-    console.error('❌ Email send error:', error.message);
-    
-    // Return error object instead of throwing
-    return {
-      success: false,
-      error: error.message,
-      provider: 'error'
-    };
+    console.error('❌ Email send failed:', error.message);
+    return { success: false, provider: 'gmail-api', error: error.message };
   }
 };
 
