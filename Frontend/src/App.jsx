@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
 import Login from './pages/Login';
@@ -11,7 +11,47 @@ import ServiceLocator from './components/ServiceLocator';
 import api from './services/api';
 import './App.css';
 
-// OAuth Callback Handler Component
+// 1) TokenCapture: runs BEFORE routes render to ensure token exists for PrivateRoute
+function TokenCapture({ onReady }) {
+  const location = useLocation();
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      let token = null;
+
+      // Prefer query (?token=...)
+      const qp = url.searchParams;
+      if (qp.has('token')) {
+        token = qp.get('token');
+        qp.delete('token');
+        const clean = url.pathname + (qp.toString() ? `?${qp.toString()}` : '');
+        window.history.replaceState(null, '', clean);
+      }
+
+      // Fallback: hash (#token=...)
+      if (!token && url.hash && url.hash.startsWith('#')) {
+        const hp = new URLSearchParams(url.hash.substring(1));
+        token = hp.get('token');
+        // Clean hash
+        window.history.replaceState(null, '', url.pathname + url.search);
+      }
+
+      if (token) {
+        localStorage.setItem('token', token);
+      }
+    } catch (e) {
+      console.warn('TokenCapture failed:', e);
+    } finally {
+      // Signal that the token capture step is done (so routes can render)
+      onReady(true);
+    }
+  }, [location, onReady]);
+
+  return null;
+}
+
+// 2) OAuth Callback Handler (public route)
 function OAuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -20,51 +60,55 @@ function OAuthCallback() {
 
   useEffect(() => {
     const handleOAuthCallback = async () => {
-      const token = searchParams.get('token');
+      // Check both query and hash
+      let token = searchParams.get('token');
       const error = searchParams.get('error');
+
+      if (!token && window.location.hash && window.location.hash.startsWith('#')) {
+        const hp = new URLSearchParams(window.location.hash.substring(1));
+        token = hp.get('token');
+        // Clean hash
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
 
       if (error) {
         console.error('❌ OAuth error:', error);
         setStatus('error');
         setTimeout(() => {
           navigate('/login?error=oauth_failed', { replace: true });
-        }, 2000);
+        }, 1200);
         return;
       }
 
       if (token) {
-        console.log('✅ OAuth token received');
-        
         try {
           // Store token
           localStorage.setItem('token', token);
-          
-          // Fetch user data
-          const response = await api.get('/auth/me');
-          
-          if (response.data.success) {
-            console.log('✅ User authenticated:', response.data.user.email);
-            setUser(response.data.user);
-            setStatus('success');
-            
-            // Redirect to dashboard
-            setTimeout(() => {
-              navigate('/dashboard', { replace: true });
-            }, 1000);
-          } else {
-            throw new Error('Failed to fetch user data');
+
+          // Try to fetch user (optional, but nice for immediate UI)
+          try {
+            const response = await api.get('/auth/me');
+            if (response.data?.success) {
+              setUser(response.data.user);
+            }
+          } catch (e) {
+            // Even if /me fails now, token is saved; AuthContext can hydrate later
           }
+
+          setStatus('success');
+          setTimeout(() => {
+            navigate('/dashboard', { replace: true });
+          }, 500);
         } catch (error) {
-          console.error('❌ Error processing OAuth:', error);
-          setStatus('error');
+          console.error('❌ OAuth processing error:', error);
           localStorage.removeItem('token');
-          
+          setStatus('error');
           setTimeout(() => {
             navigate('/login?error=session_failed', { replace: true });
-          }, 2000);
+          }, 1200);
         }
       } else {
-        // No token, redirect to login
+        // No token → go to login
         navigate('/login', { replace: true });
       }
     };
@@ -101,27 +145,27 @@ function OAuthCallback() {
   );
 }
 
-// Main App Component (Dashboard/Monitor/Services)
+// 3) Main App (Dashboard/Monitor/Services)
 function MainApp() {
   const [activeTab, setActiveTab] = useState('monitor');
   const [equipmentList, setEquipmentList] = useState([]);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [prefillData, setPrefillData] = useState(null);
   const [loading, setLoading] = useState(true);
-  
+
   const { user, logout } = useAuth();
 
   useEffect(() => {
     if (user) {
       fetchEquipmentList();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const fetchEquipmentList = async () => {
     setLoading(true);
     try {
       const response = await api.get('/history');
-      
       if (response.data.success) {
         setEquipmentList(response.data.history || []);
         console.log(`✅ Loaded ${response.data.history?.length || 0} equipment records`);
@@ -238,7 +282,7 @@ function MainApp() {
 
       <footer className="app-footer">
         <p>
-          Powered by AI-Driven Predictive Analytics | 
+          Powered by AI-Driven Predictive Analytics |
           <span className="footer-stats">
             {equipmentList.length > 0 && ` ${equipmentList.length} Total Records`}
           </span>
@@ -248,59 +292,74 @@ function MainApp() {
   );
 }
 
-// Root App Component with Routing
+// 4) Root App with Routing
 function App() {
+  const [bootReady, setBootReady] = useState(false);
+
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          {/* Public routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/verify-email/:token" element={<VerifyEmail />} />
-          
-          {/* OAuth callback route */}
-          <Route path="/auth/callback" element={<OAuthCallback />} />
-          
-          {/* Protected routes */}
-          <Route
-            path="/dashboard"
-            element={
-              <PrivateRoute>
-                <MainApp />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/monitor"
-            element={
-              <PrivateRoute>
-                <MainApp />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/services"
-            element={
-              <PrivateRoute>
-                <MainApp />
-              </PrivateRoute>
-            }
-          />
-          
-          {/* Root redirect */}
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <Navigate to="/dashboard" replace />
-              </PrivateRoute>
-            }
-          />
-          
-          {/* Catch all - redirect to login */}
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
+        {/* Capture token before rendering routes to avoid race with PrivateRoute */}
+        {!bootReady ? (
+          <>
+            <TokenCapture onReady={setBootReady} />
+            <div className="oauth-callback-container">
+              <div className="oauth-callback-card">
+                <div className="loading-spinner-large"></div>
+                <h2>Loading...</h2>
+              </div>
+            </div>
+          </>
+        ) : (
+          <Routes>
+            {/* Public */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/verify-email/:token" element={<VerifyEmail />} />
+
+            {/* OAuth callback (public) */}
+            <Route path="/auth/callback" element={<OAuthCallback />} />
+
+            {/* Protected */}
+            <Route
+              path="/dashboard"
+              element={
+                <PrivateRoute>
+                  <MainApp />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/monitor"
+              element={
+                <PrivateRoute>
+                  <MainApp />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/services"
+              element={
+                <PrivateRoute>
+                  <MainApp />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Root redirect */}
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <Navigate to="/dashboard" replace />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Catch-all */}
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        )}
       </AuthProvider>
     </BrowserRouter>
   );
