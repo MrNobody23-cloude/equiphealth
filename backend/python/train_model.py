@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import warnings
@@ -27,6 +27,7 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 MODEL_PATH = os.path.join(MODEL_DIR, 'health_predictor.pkl')
 SCALER_PATH = os.path.join(MODEL_DIR, 'scaler.pkl')
 FEATURE_NAMES_PATH = os.path.join(MODEL_DIR, 'feature_names.pkl')
+LABEL_ENCODER_PATH = os.path.join(MODEL_DIR, 'label_encoder.pkl')
 METADATA_PATH = os.path.join(MODEL_DIR, 'model_metadata.json')
 
 
@@ -37,7 +38,7 @@ class EquipmentMLTrainer:
         self.model = None
         self.scaler = None
         self.feature_names = None
-        self.label_encoders = {}
+        self.label_encoder = None
         
     def generate_synthetic_data(self, n_samples=10000):
         """Generate synthetic training data"""
@@ -168,26 +169,6 @@ class EquipmentMLTrainer:
             health_score += np.random.normal(0, 5)
             health_score = np.clip(health_score, 0, 100)
             
-            # Calculate risk level
-            if health_score >= 85:
-                risk_level = 'low'
-            elif health_score >= 70:
-                risk_level = 'medium'
-            elif health_score >= 50:
-                risk_level = 'high'
-            else:
-                risk_level = 'critical'
-            
-            # Calculate maintenance days
-            if risk_level == 'critical':
-                maintenance_days = np.random.randint(1, 7)
-            elif risk_level == 'high':
-                maintenance_days = np.random.randint(7, 30)
-            elif risk_level == 'medium':
-                maintenance_days = np.random.randint(30, 90)
-            else:
-                maintenance_days = np.random.randint(90, 180)
-            
             data.append({
                 'equipment_type': eq_type,
                 'operating_hours': operating_hours,
@@ -206,9 +187,7 @@ class EquipmentMLTrainer:
                 'current_draw': current_draw,
                 'oil_quality': oil_quality,
                 'efficiency_rating': efficiency_rating,
-                'health_score': health_score,
-                'risk_level': risk_level,
-                'maintenance_days': maintenance_days
+                'health_score': health_score
             })
         
         df = pd.DataFrame(data)
@@ -216,8 +195,6 @@ class EquipmentMLTrainer:
         print(f"✅ Generated {len(df)} samples")
         print(f"\nEquipment Type Distribution:")
         print(df['equipment_type'].value_counts())
-        print(f"\nRisk Level Distribution:")
-        print(df['risk_level'].value_counts())
         print(f"\nHealth Score Statistics:")
         print(df['health_score'].describe())
         
@@ -229,12 +206,15 @@ class EquipmentMLTrainer:
         print("Preparing Features...")
         print(f"{'='*60}\n")
         
-        # Encode equipment type
-        le = LabelEncoder()
-        df['equipment_type_encoded'] = le.fit_transform(df['equipment_type'])
-        self.label_encoders['equipment_type'] = le
+        # Encode equipment type with LabelEncoder
+        self.label_encoder = LabelEncoder()
+        df['equipment_type_encoded'] = self.label_encoder.fit_transform(df['equipment_type'])
         
-        # Select feature columns
+        print(f"Equipment Type Encoding Mapping:")
+        for idx, eq_type in enumerate(self.label_encoder.classes_):
+            print(f"  {eq_type}: {idx}")
+        
+        # Define feature columns in exact order
         feature_cols = [
             'equipment_type_encoded',
             'operating_hours',
@@ -260,8 +240,8 @@ class EquipmentMLTrainer:
         
         self.feature_names = feature_cols
         
-        print(f"✅ Features prepared: {len(feature_cols)} features")
-        print(f"   Feature names: {feature_cols}")
+        print(f"\n✅ Features prepared: {len(feature_cols)} features")
+        print(f"   Feature order: {feature_cols}")
         
         return X, y
     
@@ -374,6 +354,10 @@ class EquipmentMLTrainer:
         joblib.dump(self.feature_names, FEATURE_NAMES_PATH)
         print(f"✅ Feature names saved: {FEATURE_NAMES_PATH}")
         
+        # Save label encoder
+        joblib.dump(self.label_encoder, LABEL_ENCODER_PATH)
+        print(f"✅ Label encoder saved: {LABEL_ENCODER_PATH}")
+        
         # Save metadata
         metadata = {
             'trained_at': datetime.now().isoformat(),
@@ -381,8 +365,9 @@ class EquipmentMLTrainer:
             'n_features': len(self.feature_names),
             'feature_names': self.feature_names,
             'metrics': metrics,
-            'label_encoders': {
-                'equipment_type': self.label_encoders['equipment_type'].classes_.tolist()
+            'equipment_type_mapping': {
+                eq_type: int(idx) 
+                for idx, eq_type in enumerate(self.label_encoder.classes_)
             }
         }
         
@@ -393,6 +378,13 @@ class EquipmentMLTrainer:
         print(f"\n{'='*60}")
         print("✅ MODEL TRAINING COMPLETED SUCCESSFULLY!")
         print(f"{'='*60}\n")
+        
+        print("Generated files:")
+        print(f"  - {MODEL_PATH}")
+        print(f"  - {SCALER_PATH}")
+        print(f"  - {FEATURE_NAMES_PATH}")
+        print(f"  - {LABEL_ENCODER_PATH}")
+        print(f"  - {METADATA_PATH}")
         
         return metadata
 
@@ -419,6 +411,7 @@ def main():
         metadata = trainer.save_model(metrics)
         
         print("\n🎉 Training complete! You can now use the ML model for predictions.\n")
+        print("Next step: Run your backend server and the predictions will use ML model!\n")
         
         return 0
         

@@ -1,5 +1,5 @@
 {
-  "trained_at": "2025-10-12T09:35:06.925550",
+  "trained_at": "2025-10-28T13:26:07.458197",
   "model_type": "RandomForestRegressor",
   "n_features": 17,
   "feature_names": [
@@ -22,96 +22,94 @@
     "efficiency_rating"
   ],
   "metrics": {
-    "train_rmse": 3.065247720563492,
-    "train_r2": 0.9805781172015763,
-    "train_mae": 2.3401063357950744,
-    "test_rmse": 6.3046385535149,
-    "test_r2": 0.9169642648505807,
-    "test_mae": 5.044109436692217,
-    "cv_r2_mean": 0.9081971925640019,
-    "cv_r2_std": 0.0031884629391931174,
+    "train_rmse": 2.977950011234923,
+    "train_r2": 0.9811773730927162,
+    "train_mae": 2.291165727502339,
+    "test_rmse": 6.57263862232027,
+    "test_r2": 0.9104542750430835,
+    "test_mae": 5.232870254069077,
+    "cv_r2_mean": 0.9093656234264941,
+    "cv_r2_std": 0.002755924687542642,
     "feature_importance": [
       {
         "feature": "operating_hours",
-        "importance": 0.24340716762717654
+        "importance": 0.21918077403768144
       },
       {
         "feature": "battery_health",
-        "importance": 0.1495598085505842
+        "importance": 0.1418960659895367
       },
       {
         "feature": "thermal_throttling",
-        "importance": 0.1308501535268683
+        "importance": 0.1357358318575562
       },
       {
         "feature": "load_percentage",
-        "importance": 0.11798758714468792
+        "importance": 0.12213056303246601
       },
       {
         "feature": "oil_quality",
-        "importance": 0.10183014736394858
-      },
-      {
-        "feature": "efficiency_rating",
-        "importance": 0.05751872520463906
-      },
-      {
-        "feature": "ram_usage",
-        "importance": 0.05579069500770176
+        "importance": 0.10566808003917741
       },
       {
         "feature": "noise_level",
-        "importance": 0.05572203980041721
+        "importance": 0.07085000141354658
+      },
+      {
+        "feature": "efficiency_rating",
+        "importance": 0.06428882211557975
+      },
+      {
+        "feature": "ram_usage",
+        "importance": 0.05459191912609811
       },
       {
         "feature": "current_draw",
-        "importance": 0.04579380351073926
+        "importance": 0.04599003827518039
       },
       {
         "feature": "cpu_usage",
-        "importance": 0.016942709803925995
+        "importance": 0.01501301517332128
       },
       {
         "feature": "fan_speed",
-        "importance": 0.008005003442572553
+        "importance": 0.008264001600077165
       },
       {
         "feature": "rotation_speed",
-        "importance": 0.0040555488281691105
-      },
-      {
-        "feature": "screen_brightness",
-        "importance": 0.0025962764896927315
-      },
-      {
-        "feature": "power_consumption",
-        "importance": 0.0025689468934817854
+        "importance": 0.004259133590659525
       },
       {
         "feature": "equipment_type_encoded",
-        "importance": 0.002557341205655222
+        "importance": 0.002534486195552103
       },
       {
         "feature": "gpu_usage",
-        "importance": 0.002472092541615349
+        "importance": 0.0024623976531707222
+      },
+      {
+        "feature": "power_consumption",
+        "importance": 0.0024278855507638077
       },
       {
         "feature": "network_activity",
-        "importance": 0.00234195305812438
+        "importance": 0.0023656341946214875
+      },
+      {
+        "feature": "screen_brightness",
+        "importance": 0.002341350155011253
       }
     ]
   },
-  "label_encoders": {
-    "equipment_type": [
-      "compressor",
-      "desktop",
-      "hvac",
-      "industrial_machine",
-      "laptop",
-      "motor",
-      "phone",
-      "pump",
-      "tablet"
-    ]
+  "equipment_type_mapping": {
+    "compressor": 0,
+    "desktop": 1,
+    "hvac": 2,
+    "industrial_machine": 3,
+    "laptop": 4,
+    "motor": 5,
+    "phone": 6,
+    "pump": 7,
+    "tablet": 8
   }
 }
