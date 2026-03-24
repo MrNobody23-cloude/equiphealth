@@ -201,42 +201,52 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
             className="refresh-btn"
             title="Refresh from database"
           >
-            🔄 Refresh
+            Refresh Network
           </button>
         </div>
       </div>
 
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon">📦</div>
-          <div className="stat-content">
-            <div className="stat-value">{stats.uniqueDevices}</div>
-            <div className="stat-label">Unique Devices</div>
-            <div className="stat-sublabel">{stats.total} total records</div>
+      <div className="equipment-grid">
+        <div className="equipment-card">
+          <div className="card-header">
+            <div className="equipment-info">
+              <span className="equipment-type">Asset Inventory</span>
+              <h4 className="equipment-name">Fleet Scope</h4>
+            </div>
+            <div className="status-badge status-healthy">{stats.uniqueDevices} Units</div>
+          </div>
+          <div className="card-content">
+             <div className="data-item">
+               <div className="data-label">Total Logs</div>
+               <div className="data-value">{stats.total}</div>
+             </div>
+             <div className="data-item">
+               <div className="data-label">Avg Health</div>
+               <div className="data-value">{Math.round(stats.avgHealth)}%</div>
+             </div>
           </div>
         </div>
 
-        <div className="stat-card healthy">
-          <div className="stat-icon">✅</div>
-          <div className="stat-content">
-            <div className="stat-value">{stats.healthy}</div>
-            <div className="stat-label">Healthy</div>
+        <div className={`equipment-card`}>
+          <div className="card-header">
+            <div className="equipment-info">
+              <span className="equipment-type">Status Breakdown</span>
+              <h4 className="equipment-name">System Integrity</h4>
+            </div>
           </div>
-        </div>
-
-        <div className="stat-card warning">
-          <div className="stat-icon">⚠️</div>
-          <div className="stat-content">
-            <div className="stat-value">{stats.needsAttention}</div>
-            <div className="stat-label">Needs Attention</div>
-          </div>
-        </div>
-
-        <div className="stat-card critical">
-          <div className="stat-icon">🚨</div>
-          <div className="stat-content">
-            <div className="stat-value">{stats.critical}</div>
-            <div className="stat-label">Critical</div>
+          <div className="card-content">
+             <div className="data-item">
+               <div className="data-label">Healthy</div>
+               <div className="data-value" style={{color: 'var(--primary)'}}>{stats.healthy}</div>
+             </div>
+             <div className="data-item">
+               <div className="data-label">Attention</div>
+               <div className="data-value" style={{color: 'var(--warning)'}}>{stats.needsAttention}</div>
+             </div>
+             <div className="data-item">
+               <div className="data-label">Critical</div>
+               <div className="data-value" style={{color: 'var(--error)'}}>{stats.critical}</div>
+             </div>
           </div>
         </div>
       </div>
@@ -282,7 +292,7 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
             <p>Start monitoring equipment to see analytics and insights here.</p>
           </div>
         ) : (
-          <div className="equipment-cards">
+          <div className="equipment-grid">
             {latestRecords
               .sort((a, b) => {
                 if (sortBy === 'health') {
@@ -302,7 +312,7 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
 
                 return (
                   <div key={equipment._id} className="equipment-card">
-                    <div className="equipment-card-header">
+                    <div className="card-header">
                       <div className="equipment-info">
                         <h4 className="equipment-name">
                           {equipment.equipmentName}
@@ -316,57 +326,35 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
                       </div>
                       <div className="equipment-header-right">
                         <div
-                          className="health-badge"
-                          style={{ backgroundColor: getHealthColor(equipment.prediction?.health_score || 0) }}
+                          className={`status-badge status-${equipment.prediction?.health_score >= 85 ? 'healthy' : equipment.prediction?.health_score >= 50 ? 'warning' : 'critical'}`}
                         >
-                          {Math.round(equipment.prediction?.health_score || 0)}
-                        </div>
-                        {trend && (
-                          <div className="trend-badge" style={{ color: trend.color }}>
-                            {trend.icon} {trend.text}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="equipment-card-body">
-                      <div className="equipment-metric">
-                        <span className="metric-icon">🔧</span>
-                        <div className="metric-info">
-                          <div className="metric-value-small">
-                            {equipment.prediction?.maintenance_needed_days || 'N/A'} days
-                          </div>
-                          <div className="metric-label-small">Until Maintenance</div>
-                        </div>
-                      </div>
-
-                      <div className="equipment-metric">
-                        <span className="metric-icon">📅</span>
-                        <div className="metric-info">
-                          <div className="metric-value-small">
-                            {equipment.prediction?.remaining_life_days || 'N/A'} days
-                          </div>
-                          <div className="metric-label-small">Remaining Life</div>
-                        </div>
-                      </div>
-
-                      <div className="equipment-metric">
-                        <span className="metric-icon">⚡</span>
-                        <div className="metric-info">
-                          <div
-                            className="risk-indicator"
-                            style={{ backgroundColor: getRiskColor(equipment.prediction?.risk_level) }}
-                          >
-                            {equipment.prediction?.risk_level?.toUpperCase() || 'UNKNOWN'}
-                          </div>
-                          <div className="metric-label-small">Risk Level</div>
+                          Health: {Math.round(equipment.prediction?.health_score || 0)}%
                         </div>
                       </div>
                     </div>
 
-                    <div className="equipment-card-footer">
-                      <span className="timestamp">
-                        Last checked: {new Date(equipment.timestamp).toLocaleString()}
+                    <div className="card-content">
+                      <div className="data-item">
+                        <div className="data-label">Until Maintenance</div>
+                        <div className="data-value">{equipment.prediction?.maintenance_needed_days || 'N/A'} days</div>
+                      </div>
+
+                      <div className="data-item">
+                        <div className="data-label">Remaining Life</div>
+                        <div className="data-value">{equipment.prediction?.remaining_life_days || 'N/A'} days</div>
+                      </div>
+
+                      <div className="data-item">
+                        <div className="data-label">Risk Level</div>
+                        <div className={`status-badge status-${equipment.prediction?.risk_level || 'low'}`}>
+                          {equipment.prediction?.risk_level?.toUpperCase() || 'UNKNOWN'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card-footer">
+                      <span className="last-analysis">
+                        Analysed: {new Date(equipment.timestamp).toLocaleDateString()}
                       </span>
                       <div className="equipment-actions">
                         {equipment.totalRecords > 1 && (
@@ -379,11 +367,11 @@ function Dashboard({ equipmentList, refreshEquipmentList, setSelectedEquipment, 
                           </button>
                         )}
                         <button
-                          className="btn-add-readings"
+                          className="action-btn"
                           onClick={() => onAddReadings(equipment)}
                           title="Add new sensor readings for this equipment"
                         >
-                          ➕ Add Readings
+                          Add Readings
                         </button>
                         <button
                           className="btn-delete"

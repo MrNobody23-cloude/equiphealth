@@ -96,7 +96,8 @@ function OAuthCallback() {
 
 // Main app content (protected)
 function MainApp() {
-  const [activeTab, setActiveTab] = useState('monitor');
+  const location = useLocation();
+  const navigate = useNavigate();
   const [equipmentList, setEquipmentList] = useState([]);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [prefillData, setPrefillData] = useState(null);
@@ -104,6 +105,10 @@ function MainApp() {
 
   const { user, logout } = useAuth();
 
+  // Determine active tab from URL
+  const activeTab = location.pathname.substring(1) || 'monitor';
+
+  // Sync state or redirect if needed
   useEffect(() => {
     if (user) fetchEquipmentList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,7 +133,7 @@ function MainApp() {
       equipmentName: equipment.equipmentName,
       equipmentType: equipment.equipmentType,
     });
-    setActiveTab('monitor');
+    navigate('/monitor');
   };
 
   const handleLogout = async () => {
@@ -141,8 +146,8 @@ function MainApp() {
     <div className="app-container">
       <header className="app-header">
         <div className="header-content">
-          <h1 className="app-title">🤖 AI Equipment Health Monitor</h1>
-          <p className="app-subtitle">Intelligent Diagnostics & Predictive Maintenance</p>
+          <h1 className="app-title">EquipHealth Pro</h1>
+          <p className="app-subtitle">The Industrial Sentinel • Predictive Asset Management</p>
         </div>
         {user && (
           <div className="user-menu">
@@ -157,20 +162,20 @@ function MainApp() {
                 <div className="user-email">{user.email}</div>
               </div>
             </div>
-            <button onClick={handleLogout} className="logout-btn">🚪 Logout</button>
+            <button onClick={handleLogout} className="logout-btn">Terminate Session</button>
           </div>
         )}
       </header>
 
       <nav className="app-nav">
-        <button className={`nav-btn ${activeTab === 'monitor' ? 'active' : ''}`} onClick={() => setActiveTab('monitor')}>
-          <span className="nav-icon">📊</span><span className="nav-text">Monitor Equipment</span>
+        <button className={`nav-btn ${activeTab === 'monitor' ? 'active' : ''}`} onClick={() => navigate('/monitor')}>
+          <span className="nav-text">Diagnostics</span>
         </button>
-        <button className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-          <span className="nav-icon">📈</span><span className="nav-text">Dashboard</span>
+        <button className={`nav-btn ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+          <span className="nav-text">Analytics</span>
         </button>
-        <button className={`nav-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => setActiveTab('services')}>
-          <span className="nav-icon">🔧</span><span className="nav-text">Service Locator</span>
+        <button className={`nav-btn ${activeTab === 'services' ? 'active' : ''}`} onClick={() => navigate('/services')}>
+          <span className="nav-text">Service Network</span>
         </button>
       </nav>
 

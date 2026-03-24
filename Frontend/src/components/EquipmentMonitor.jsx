@@ -94,7 +94,7 @@ function EquipmentMonitor({
     if (ambientLightSensorRef.current) {
       try {
         ambientLightSensorRef.current.stop();
-      } catch (e) {}
+      } catch (e) { }
     }
   };
 
@@ -419,18 +419,6 @@ function EquipmentMonitor({
     }
   };
 
-  const getRiskColor = (risk) => {
-    const colors = { low: '#10b981', medium: '#f59e0b', high: '#ef4444', critical: '#dc2626' };
-    return colors[risk] || '#6b7280';
-  };
-
-  const getHealthColor = (score) => {
-    if (score >= 85) return '#10b981';
-    if (score >= 70) return '#3b82f6';
-    if (score >= 50) return '#f59e0b';
-    return '#ef4444';
-  };
-
   const getDeviceSpecificHelp = () => {
     const isComputerDevice = ['laptop', 'phone', 'tablet', 'desktop'].includes(equipmentType);
     const isIndustrialDevice = ['industrial_machine', 'motor', 'pump', 'compressor', 'hvac'].includes(equipmentType);
@@ -520,43 +508,43 @@ function EquipmentMonitor({
   const deviceHelp = getDeviceSpecificHelp();
 
   return (
-    <div className="equipment-monitor">
-      <div className="monitor-grid">
-        <div className="input-section">
-          <h2 className="section-title">⚙️ Equipment Configuration</h2>
+    <div className="monitor-container">
+      <div className="monitor-card">
+        <h2 className="monitor-title">Digital Health Diagnostic</h2>
 
-          {equipmentName && equipmentType && (
-            <div className="prefill-notification">
-              ℹ️ Adding new readings for: <strong>{equipmentName}</strong> ({equipmentType})
-            </div>
-          )}
+        {equipmentName && equipmentType && (
+          <div className="prefill-notification" style={{ marginBottom: '2rem', textAlign: 'center', opacity: 0.6 }}>
+            📝 Updating records for: <strong>{equipmentName}</strong>
+          </div>
+        )}
 
+        <div className="monitor-form">
           <div className="form-group">
-            <label>Equipment Type</label>
+            <label>Asset Class</label>
             <select
               value={equipmentType}
               onChange={(e) => setEquipmentType(e.target.value)}
               className="form-select"
             >
-              <option value="laptop">💻 Laptop</option>
-              <option value="phone">📱 Phone</option>
-              <option value="tablet">📱 Tablet</option>
-              <option value="desktop">🖥️ Desktop</option>
-              <option value="industrial_machine">🏭 Industrial Machine</option>
-              <option value="hvac">❄️ HVAC System</option>
-              <option value="motor">⚙️ Motor</option>
-              <option value="pump">💧 Pump</option>
-              <option value="compressor">🔧 Compressor</option>
+              <option value="laptop">Laptop Computer</option>
+              <option value="phone">Mobile Device</option>
+              <option value="tablet">Tablet / Handheld</option>
+              <option value="desktop">Workstation</option>
+              <option value="industrial_machine">Industrial Machinery</option>
+              <option value="hvac">HVAC System</option>
+              <option value="motor">Electric Motor</option>
+              <option value="pump">Hydraulic Pump</option>
+              <option value="compressor">Air Compressor</option>
             </select>
           </div>
 
           <div className="form-group">
-            <label>Equipment Name / Model</label>
+            <label>Identifier / Model</label>
             <input
               type="text"
               value={equipmentName}
               onChange={(e) => setEquipmentName(e.target.value)}
-              placeholder="e.g., Dell XPS 15, iPhone 13, ABB Motor M3000"
+              placeholder="e.g., Sentinel-9000, Industrial Motor-X2"
               className="form-input"
             />
           </div>
@@ -574,539 +562,532 @@ function EquipmentMonitor({
             </div>
           )}
 
-          <h3 className="subsection-title">📊 Sensor Readings</h3>
-
-          <div className="sensor-grid">
-            <div className="form-group">
-              <label>⏱️ Operating Hours</label>
-              <input
-                type="number"
-                value={sensorData.operating_hours}
-                onChange={(e) => handleInputChange('operating_hours', e.target.value)}
-                placeholder="0-20000"
-                className="form-input"
-              />
-            </div>
-
-            {['industrial_machine', 'motor', 'pump', 'compressor', 'hvac'].includes(equipmentType) && (
-              <>
-                <div className="form-group">
-                  <label>📊 Load Percentage (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.load_percentage}
-                    onChange={(e) => handleInputChange('load_percentage', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🔊 Noise Level (dB)</label>
-                  <input
-                    type="number"
-                    value={sensorData.noise_level}
-                    onChange={(e) => handleInputChange('noise_level', e.target.value)}
-                    placeholder="40-110"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🔄 Rotation Speed (RPM)</label>
-                  <input
-                    type="number"
-                    value={sensorData.rotation_speed}
-                    onChange={(e) => handleInputChange('rotation_speed', e.target.value)}
-                    placeholder="0-6000"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>⚡ Current Draw (Amps)</label>
-                  <input
-                    type="number"
-                    value={sensorData.current_draw}
-                    onChange={(e) => handleInputChange('current_draw', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🛢️ Oil Quality (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.oil_quality}
-                    onChange={(e) => handleInputChange('oil_quality', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>⚡ Efficiency Rating (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.efficiency_rating}
-                    onChange={(e) => handleInputChange('efficiency_rating', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-              </>
-            )}
-
-            {['laptop', 'phone', 'tablet', 'desktop'].includes(equipmentType) && (
-              <>
-                <div className="form-group">
-                  <label>💻 CPU Usage (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.cpu_usage}
-                    onChange={(e) => handleInputChange('cpu_usage', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>💾 RAM Usage (GB)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={sensorData.ram_usage}
-                    onChange={(e) => handleInputChange('ram_usage', e.target.value)}
-                    placeholder="0-32"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🔋 Battery Health (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.battery_health}
-                    onChange={(e) => handleInputChange('battery_health', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>⚡ Power Consumption (W)</label>
-                  <input
-                    type="number"
-                    value={sensorData.power_consumption}
-                    onChange={(e) => handleInputChange('power_consumption', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🌀 Fan Speed (RPM)</label>
-                  <input
-                    type="number"
-                    value={sensorData.fan_speed}
-                    onChange={(e) => handleInputChange('fan_speed', e.target.value)}
-                    placeholder="0-5000"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🌡️ Thermal Throttling (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.thermal_throttling}
-                    onChange={(e) => handleInputChange('thermal_throttling', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>🎮 GPU Usage (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.gpu_usage}
-                    onChange={(e) => handleInputChange('gpu_usage', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>☀️ Screen Brightness (%)</label>
-                  <input
-                    type="number"
-                    value={sensorData.screen_brightness}
-                    onChange={(e) => handleInputChange('screen_brightness', e.target.value)}
-                    placeholder="0-100"
-                    className="form-input"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>
-                    🌐 Network Activity (Mbps){' '}
-                    {sensorData.network_activity && <span className="detected-badge real">✓ Auto</span>}
-                  </label>
-                  <input
-                    type="number"
-                    value={sensorData.network_activity}
-                    onChange={(e) => handleInputChange('network_activity', e.target.value)}
-                    placeholder="0-1000"
-                    className="form-input"
-                  />
-                </div>
-              </>
-            )}
+          <div className="form-group full-width">
+            <label>Accumulated Operating Hours</label>
+            <input
+              type="number"
+              value={sensorData.operating_hours}
+              onChange={(e) => handleInputChange('operating_hours', e.target.value)}
+              placeholder="Total hours of operation"
+              className="form-input"
+            />
           </div>
 
-          {systemInfo && (
-            <div className="system-info-container">
-              <div className="system-info-header">
-                <h4>🔍 System Information (Reference Only)</h4>
-                <span className="info-badge">Auto-Detected</span>
+          {['industrial_machine', 'motor', 'pump', 'compressor', 'hvac'].includes(equipmentType) && (
+            <>
+              <div className="form-group">
+                <label>Current Load (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.load_percentage}
+                  onChange={(e) => handleInputChange('load_percentage', e.target.value)}
+                  placeholder="0-100"
+                />
               </div>
-
-              <div className="browser-limitation-notice">
-                <div className="notice-icon">⚠️</div>
-                <div className="notice-content">
-                  <strong>Browser Security Limitations</strong>
-                  <p>
-                    For privacy and security, browsers cannot access most system values. Below shows what's available vs. what you need to enter manually.
-                  </p>
-                </div>
+              <div className="form-group">
+                <label>Acoustic Emission (dB)</label>
+                <input
+                  type="number"
+                  value={sensorData.noise_level}
+                  onChange={(e) => handleInputChange('noise_level', e.target.value)}
+                  placeholder="Operational noise"
+                />
               </div>
-
-              <div className="info-grid">
-                <div className="info-item verified">
-                  <span className="info-icon">✅</span>
-                  <div className="info-details">
-                    <span className="info-label">CPU Cores</span>
-                    <span className="info-value">{systemInfo.cpuCores}</span>
-                  </div>
-                </div>
-                <div className="info-item verified">
-                  <span className="info-icon">✅</span>
-                  <div className="info-details">
-                    <span className="info-label">Total RAM</span>
-                    <span className="info-value">{systemInfo.memory}</span>
-                  </div>
-                </div>
-                <div className="info-item verified">
-                  <span className="info-icon">✅</span>
-                  <div className="info-details">
-                    <span className="info-label">Platform</span>
-                    <span className="info-value">{systemInfo.platform}</span>
-                  </div>
-                </div>
-                <div className="info-item verified">
-                  <span className="info-icon">✅</span>
-                  <div className="info-details">
-                    <span className="info-label">Online Status</span>
-                    <span className="info-value">{systemInfo.onLine ? '🟢 Online' : '🔴 Offline'}</span>
-                  </div>
-                </div>
+              <div className="form-group">
+                <label>🔄 Rotation Speed (RPM)</label>
+                <input
+                  type="number"
+                  value={sensorData.rotation_speed}
+                  onChange={(e) => handleInputChange('rotation_speed', e.target.value)}
+                  placeholder="0-6000"
+                  className="form-input"
+                />
               </div>
-
-              {detectedValues?.battery && (
-                <div className="detection-card real-data">
-                  <div className="card-header">
-                    <h5>🔋 Battery Information</h5>
-                    <span className="data-badge real">✓ Real Data</span>
-                  </div>
-                  <div className="card-grid">
-                    <div className="card-item">
-                      <span className="card-label">Current Level</span>
-                      <span className="card-value">{detectedValues.battery.level}%</span>
-                    </div>
-                    <div className="card-item">
-                      <span className="card-label">Status</span>
-                      <span className="card-value">{detectedValues.battery.charging ? '⚡ Charging' : '🔋 Discharging'}</span>
-                    </div>
-                    <div className="card-item">
-                      <span className="card-label">Time to Full</span>
-                      <span className="card-value">{detectedValues.battery.chargingTime}</span>
-                    </div>
-                    <div className="card-item">
-                      <span className="card-label">Time Remaining</span>
-                      <span className="card-value">{detectedValues.battery.dischargingTime}</span>
-                    </div>
-                  </div>
-                  <div className="card-note warning">
-                    <span className="note-icon">⚠️</span>
-                    <span className="note-text">
-                      <strong>Battery Health cannot be detected by browsers.</strong> Please check your system settings to find actual battery
-                      health percentage.
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {detectedValues?.network && (
-                <div className="detection-card real-data">
-                  <div className="card-header">
-                    <h5>🌐 Network Information</h5>
-                    <span className="data-badge real">✓ Real Data</span>
-                  </div>
-                  <div className="card-grid">
-                    {detectedValues.network.downlink && (
-                      <div className="card-item">
-                        <span className="card-label">Download Speed</span>
-                        <span className="card-value">{detectedValues.network.downlink} Mbps</span>
-                      </div>
-                    )}
-                    <div className="card-item">
-                      <span className="card-label">Connection Type</span>
-                      <span className="card-value">{detectedValues.network.effectiveType}</span>
-                    </div>
-                    {detectedValues.network.rtt && (
-                      <div className="card-item">
-                        <span className="card-label">Latency</span>
-                        <span className="card-value">{detectedValues.network.rtt} ms</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="card-note success">
-                    <span className="note-icon">✓</span>
-                    <span className="note-text">Network speed auto-populated in Network Activity field</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="reference-estimates">
-                <div className="estimates-header">
-                  <h5>📝 Reference Estimates Only - Manual Entry Required</h5>
-                  <p>These values are approximations. Please verify and enter actual values from your system monitor.</p>
-                </div>
-
-                <div className="estimates-grid">
-                  {detectedValues?.brightness && (
-                    <div className="estimate-card">
-                      <div className="estimate-header">
-                        <span className="estimate-icon">☀️</span>
-                        <div className="estimate-title">
-                          <strong>Screen Brightness</strong>
-                          <span className="confidence-badge low">{detectedValues.brightness.confidence} Confidence</span>
-                        </div>
-                      </div>
-                      <div className="estimate-value">
-                        <span className="estimate-label">Our Estimate:</span>
-                        <span className="estimate-number">{detectedValues.brightness.value}%</span>
-                      </div>
-                      <div className="estimate-details">
-                        <div className="detail-row">
-                          <span className="detail-label">Method:</span>
-                          <span className="detail-value">{detectedValues.brightness.method}</span>
-                        </div>
-                        {detectedValues.brightness.lux && (
-                          <div className="detail-row">
-                            <span className="detail-label">Ambient Light:</span>
-                            <span className="detail-value">{detectedValues.brightness.lux} lux</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="estimate-note">
-                        <span className="note-icon">ℹ️</span>
-                        <span className="note-text">{detectedValues.brightness.note}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {detectedValues?.cpu && (
-                    <div className="estimate-card">
-                      <div className="estimate-header">
-                        <span className="estimate-icon">🖥️</span>
-                        <div className="estimate-title">
-                          <strong>CPU Usage</strong>
-                          <span className="confidence-badge low">Low Confidence</span>
-                        </div>
-                      </div>
-                      <div className="estimate-value">
-                        <span className="estimate-label">Our Estimate:</span>
-                        <span className="estimate-number">{detectedValues.cpu.estimatedUsage}%</span>
-                      </div>
-                      <div className="estimate-details">
-                        <div className="detail-row">
-                          <span className="detail-label">Benchmark Time:</span>
-                          <span className="detail-value">{detectedValues.cpu.benchmarkTime} ms</span>
-                        </div>
-                      </div>
-                      <div className="estimate-note">
-                        <span className="note-icon">ℹ️</span>
-                        <span className="note-text">{detectedValues.cpu.note}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {detectedValues?.thermal && (
-                    <div className="estimate-card">
-                      <div className="estimate-header">
-                        <span className="estimate-icon">🌡️</span>
-                        <div className="estimate-title">
-                          <strong>Thermal Throttling</strong>
-                          <span className="confidence-badge low">Low Confidence</span>
-                        </div>
-                      </div>
-                      <div className="estimate-value">
-                        <span className="estimate-label">Our Estimate:</span>
-                        <span className="estimate-number">{detectedValues.thermal.throttlingPercent}%</span>
-                      </div>
-                      <div className="estimate-details">
-                        <div className="detail-row">
-                          <span className="detail-label">Performance Variance:</span>
-                          <span className="detail-value">{detectedValues.thermal.performanceDrop}%</span>
-                        </div>
-                      </div>
-                      <div className="estimate-note">
-                        <span className="note-icon">ℹ️</span>
-                        <span className="note-text">Estimated from benchmark performance variation</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {detectedValues?.ram && (
-                    <div className="estimate-card">
-                      <div className="estimate-header">
-                        <span className="estimate-icon">💾</span>
-                        <div className="estimate-title">
-                          <strong>RAM Usage</strong>
-                          <span className="confidence-badge low">Low Confidence</span>
-                        </div>
-                      </div>
-                      <div className="estimate-value">
-                        <span className="estimate-label">Our Estimate:</span>
-                        <span className="estimate-number">{detectedValues.ram.estimatedUsage} GB</span>
-                      </div>
-                      <div className="estimate-details">
-                        <div className="detail-row">
-                          <span className="detail-label">Total RAM:</span>
-                          <span className="detail-value">{detectedValues.ram.totalRAM} GB</span>
-                        </div>
-                        <div className="detail-row">
-                          <span className="detail-label">JS Heap Used:</span>
-                          <span className="detail-value">{detectedValues.ram.heapUsed} GB</span>
-                        </div>
-                      </div>
-                      <div className="estimate-note">
-                        <span className="note-icon">ℹ️</span>
-                        <span className="note-text">{detectedValues.ram.note}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              <div className="form-group">
+                <label>⚡ Current Draw (Amps)</label>
+                <input
+                  type="number"
+                  value={sensorData.current_draw}
+                  onChange={(e) => handleInputChange('current_draw', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
               </div>
-            </div>
+              <div className="form-group">
+                <label>🛢️ Oil Quality (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.oil_quality}
+                  onChange={(e) => handleInputChange('oil_quality', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>⚡ Efficiency Rating (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.efficiency_rating}
+                  onChange={(e) => handleInputChange('efficiency_rating', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+            </>
           )}
 
-          {deviceHelp && (
-            <div className="device-help-guide">
-              <div className="help-guide-header">
-                <h4>{deviceHelp.title}</h4>
-                <p>Follow these methods to get accurate sensor readings for your equipment:</p>
+          {['laptop', 'phone', 'tablet', 'desktop'].includes(equipmentType) && (
+            <>
+              <div className="form-group">
+                <label>💻 CPU Usage (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.cpu_usage}
+                  onChange={(e) => handleInputChange('cpu_usage', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
               </div>
-              <div className="help-sections">
-                {deviceHelp.sections.map((section, idx) => (
-                  <div key={idx} className="help-section">
-                    <div className="help-section-header">
-                      <span className="help-icon">{section.icon}</span>
-                      <h5>{section.title}</h5>
-                    </div>
-                    <div className="help-items">
-                      {section.items.map((item, itemIdx) => (
-                        <div key={itemIdx} className="help-item">
-                          <div className="help-item-label">{item.label}</div>
-                          <div className="help-item-value">{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <div className="form-group">
+                <label>💾 RAM Usage (GB)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={sensorData.ram_usage}
+                  onChange={(e) => handleInputChange('ram_usage', e.target.value)}
+                  placeholder="0-32"
+                  className="form-input"
+                />
               </div>
-            </div>
+              <div className="form-group">
+                <label>🔋 Battery Health (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.battery_health}
+                  onChange={(e) => handleInputChange('battery_health', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>⚡ Power Consumption (W)</label>
+                <input
+                  type="number"
+                  value={sensorData.power_consumption}
+                  onChange={(e) => handleInputChange('power_consumption', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>🌀 Fan Speed (RPM)</label>
+                <input
+                  type="number"
+                  value={sensorData.fan_speed}
+                  onChange={(e) => handleInputChange('fan_speed', e.target.value)}
+                  placeholder="0-5000"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>🌡️ Thermal Throttling (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.thermal_throttling}
+                  onChange={(e) => handleInputChange('thermal_throttling', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>🎮 GPU Usage (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.gpu_usage}
+                  onChange={(e) => handleInputChange('gpu_usage', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>☀️ Screen Brightness (%)</label>
+                <input
+                  type="number"
+                  value={sensorData.screen_brightness}
+                  onChange={(e) => handleInputChange('screen_brightness', e.target.value)}
+                  placeholder="0-100"
+                  className="form-input"
+                />
+              </div>
+              <div className="form-group">
+                <label>
+                  🌐 Network Activity (Mbps){' '}
+                  {sensorData.network_activity && <span className="detected-badge real">✓ Auto</span>}
+                </label>
+                <input
+                  type="number"
+                  value={sensorData.network_activity}
+                  onChange={(e) => handleInputChange('network_activity', e.target.value)}
+                  placeholder="0-1000"
+                  className="form-input"
+                />
+              </div>
+            </>
           )}
-
-          <button onClick={analyzeEquipment} disabled={analyzing} className="analyze-btn">
-            {analyzing ? (
-              <>
-                <span className="spinner"></span>
-                <span>Analyzing Equipment...</span>
-              </>
-            ) : (
-              <>
-                <span className="btn-icon">🔍</span>
-                <span>Analyze Equipment Health</span>
-              </>
-            )}
-          </button>
         </div>
 
-        <div className="results-section">
-          {prediction ? (
-            <>
-              <h2 className="section-title">🤖 AI Health Analysis</h2>
-              <div className="health-score-card">
-                <div
-                  className="score-circle"
-                  style={{
-                    background: `conic-gradient(${getHealthColor(prediction.health_score)} ${
-                      prediction.health_score * 3.6
-                    }deg, #334155 0deg)`
-                  }}
-                >
-                  <div className="score-inner">
-                    <span className="score-value">{Math.round(prediction.health_score)}</span>
-                    <span className="score-label">Health Score</span>
-                  </div>
-                </div>
-                <div className="risk-badge" style={{ backgroundColor: getRiskColor(prediction.risk_level) }}>
-                  Risk Level: {prediction.risk_level?.toUpperCase?.() || 'N/A'}
+        {systemInfo && (
+          <div className="system-info-container">
+            <div className="system-info-header">
+              <h4>🔍 System Information (Reference Only)</h4>
+              <span className="info-badge">Auto-Detected</span>
+            </div>
+
+            <div className="browser-limitation-notice">
+              <div className="notice-icon">⚠️</div>
+              <div className="notice-content">
+                <strong>Browser Security Limitations</strong>
+                <p>
+                  For privacy and security, browsers cannot access most system values. Below shows what's available vs. what you need to enter manually.
+                </p>
+              </div>
+            </div>
+
+            <div className="info-grid">
+              <div className="info-item verified">
+                <span className="info-icon">✅</span>
+                <div className="info-details">
+                  <span className="info-label">CPU Cores</span>
+                  <span className="info-value">{systemInfo.cpuCores}</span>
                 </div>
               </div>
-              <div className="metrics-grid">
-                <div className="metric-card">
-                  <div className="metric-icon">📅</div>
-                  <div className="metric-content">
-                    <div className="metric-value">{prediction.remaining_life_days}</div>
-                    <div className="metric-label">Days Remaining Life</div>
-                  </div>
-                </div>
-                <div className="metric-card">
-                  <div className="metric-icon">🔧</div>
-                  <div className="metric-content">
-                    <div className="metric-value">{prediction.maintenance_needed_days}</div>
-                    <div className="metric-label">Days Until Maintenance</div>
-                  </div>
+              <div className="info-item verified">
+                <span className="info-icon">✅</span>
+                <div className="info-details">
+                  <span className="info-label">Total RAM</span>
+                  <span className="info-value">{systemInfo.memory}</span>
                 </div>
               </div>
-              {Array.isArray(prediction.recommendations) && (
-                <div className="recommendations">
-                  <h3>💡 AI Recommendations</h3>
-                  <ul className="recommendation-list">
-                    {prediction.recommendations.map((rec, index) => (
-                      <li key={index} className="recommendation-item">
-                        <span className="rec-icon">•</span>
-                        <span>{rec}</span>
-                      </li>
+              <div className="info-item verified">
+                <span className="info-icon">✅</span>
+                <div className="info-details">
+                  <span className="info-label">Platform</span>
+                  <span className="info-value">{systemInfo.platform}</span>
+                </div>
+              </div>
+              <div className="info-item verified">
+                <span className="info-icon">✅</span>
+                <div className="info-details">
+                  <span className="info-label">Online Status</span>
+                  <span className="info-value">{systemInfo.onLine ? '🟢 Online' : '🔴 Offline'}</span>
+                </div>
+              </div>
+            </div>
+
+            {detectedValues?.battery && (
+              <div className="detection-card real-data">
+                <div className="card-header">
+                  <h5>🔋 Battery Information</h5>
+                  <span className="data-badge real">✓ Real Data</span>
+                </div>
+                <div className="card-grid">
+                  <div className="card-item">
+                    <span className="card-label">Current Level</span>
+                    <span className="card-value">{detectedValues.battery.level}%</span>
+                  </div>
+                  <div className="card-item">
+                    <span className="card-label">Status</span>
+                    <span className="card-value">{detectedValues.battery.charging ? '⚡ Charging' : '🔋 Discharging'}</span>
+                  </div>
+                  <div className="card-item">
+                    <span className="card-label">Time to Full</span>
+                    <span className="card-value">{detectedValues.battery.chargingTime}</span>
+                  </div>
+                  <div className="card-item">
+                    <span className="card-label">Time Remaining</span>
+                    <span className="card-value">{detectedValues.battery.dischargingTime}</span>
+                  </div>
+                </div>
+                <div className="card-note warning">
+                  <span className="note-icon">⚠️</span>
+                  <span className="note-text">
+                    <strong>Battery Health cannot be detected by browsers.</strong> Please check your system settings to find actual battery
+                    health percentage.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {detectedValues?.network && (
+              <div className="detection-card real-data">
+                <div className="card-header">
+                  <h5>🌐 Network Information</h5>
+                  <span className="data-badge real">✓ Real Data</span>
+                </div>
+                <div className="card-grid">
+                  {detectedValues.network.downlink && (
+                    <div className="card-item">
+                      <span className="card-label">Download Speed</span>
+                      <span className="card-value">{detectedValues.network.downlink} Mbps</span>
+                    </div>
+                  )}
+                  <div className="card-item">
+                    <span className="card-label">Connection Type</span>
+                    <span className="card-value">{detectedValues.network.effectiveType}</span>
+                  </div>
+                  {detectedValues.network.rtt && (
+                    <div className="card-item">
+                      <span className="card-label">Latency</span>
+                      <span className="card-value">{detectedValues.network.rtt} ms</span>
+                    </div>
+                  )}
+                </div>
+                <div className="card-note success">
+                  <span className="note-icon">✓</span>
+                  <span className="note-text">Network speed auto-populated in Network Activity field</span>
+                </div>
+              </div>
+            )}
+
+            <div className="reference-estimates">
+              <div className="estimates-header">
+                <h5>📝 Reference Estimates Only - Manual Entry Required</h5>
+                <p>These values are approximations. Please verify and enter actual values from your system monitor.</p>
+              </div>
+
+              <div className="estimates-grid">
+                {detectedValues?.brightness && (
+                  <div className="estimate-card">
+                    <div className="estimate-header">
+                      <span className="estimate-icon">☀️</span>
+                      <div className="estimate-title">
+                        <strong>Screen Brightness</strong>
+                        <span className="confidence-badge low">{detectedValues.brightness.confidence} Confidence</span>
+                      </div>
+                    </div>
+                    <div className="estimate-value">
+                      <span className="estimate-label">Our Estimate:</span>
+                      <span className="estimate-number">{detectedValues.brightness.value}%</span>
+                    </div>
+                    <div className="estimate-details">
+                      <div className="detail-row">
+                        <span className="detail-label">Method:</span>
+                        <span className="detail-value">{detectedValues.brightness.method}</span>
+                      </div>
+                      {detectedValues.brightness.lux && (
+                        <div className="detail-row">
+                          <span className="detail-label">Ambient Light:</span>
+                          <span className="detail-value">{detectedValues.brightness.lux} lux</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="estimate-note">
+                      <span className="note-icon">ℹ️</span>
+                      <span className="note-text">{detectedValues.brightness.note}</span>
+                    </div>
+                  </div>
+                )}
+
+                {detectedValues?.cpu && (
+                  <div className="estimate-card">
+                    <div className="estimate-header">
+                      <span className="estimate-icon">🖥️</span>
+                      <div className="estimate-title">
+                        <strong>CPU Usage</strong>
+                        <span className="confidence-badge low">Low Confidence</span>
+                      </div>
+                    </div>
+                    <div className="estimate-value">
+                      <span className="estimate-label">Our Estimate:</span>
+                      <span className="estimate-number">{detectedValues.cpu.estimatedUsage}%</span>
+                    </div>
+                    <div className="estimate-details">
+                      <div className="detail-row">
+                        <span className="detail-label">Benchmark Time:</span>
+                        <span className="detail-value">{detectedValues.cpu.benchmarkTime} ms</span>
+                      </div>
+                    </div>
+                    <div className="estimate-note">
+                      <span className="note-icon">ℹ️</span>
+                      <span className="note-text">{detectedValues.cpu.note}</span>
+                    </div>
+                  </div>
+                )}
+
+                {detectedValues?.thermal && (
+                  <div className="estimate-card">
+                    <div className="estimate-header">
+                      <span className="estimate-icon">🌡️</span>
+                      <div className="estimate-title">
+                        <strong>Thermal Throttling</strong>
+                        <span className="confidence-badge low">Low Confidence</span>
+                      </div>
+                    </div>
+                    <div className="estimate-value">
+                      <span className="estimate-label">Our Estimate:</span>
+                      <span className="estimate-number">{detectedValues.thermal.throttlingPercent}%</span>
+                    </div>
+                    <div className="estimate-details">
+                      <div className="detail-row">
+                        <span className="detail-label">Performance Variance:</span>
+                        <span className="detail-value">{detectedValues.thermal.performanceDrop}%</span>
+                      </div>
+                    </div>
+                    <div className="estimate-note">
+                      <span className="note-icon">ℹ️</span>
+                      <span className="note-text">Estimated from benchmark performance variation</span>
+                    </div>
+                  </div>
+                )}
+
+                {detectedValues?.ram && (
+                  <div className="estimate-card">
+                    <div className="estimate-header">
+                      <span className="estimate-icon">💾</span>
+                      <div className="estimate-title">
+                        <strong>RAM Usage</strong>
+                        <span className="confidence-badge low">Low Confidence</span>
+                      </div>
+                    </div>
+                    <div className="estimate-value">
+                      <span className="estimate-label">Our Estimate:</span>
+                      <span className="estimate-number">{detectedValues.ram.estimatedUsage} GB</span>
+                    </div>
+                    <div className="estimate-details">
+                      <div className="detail-row">
+                        <span className="detail-label">Total RAM:</span>
+                        <span className="detail-value">{detectedValues.ram.totalRAM} GB</span>
+                      </div>
+                      <div className="detail-row">
+                        <span className="detail-label">JS Heap Used:</span>
+                        <span className="detail-value">{detectedValues.ram.heapUsed} GB</span>
+                      </div>
+                    </div>
+                    <div className="estimate-note">
+                      <span className="note-icon">ℹ️</span>
+                      <span className="note-text">{detectedValues.ram.note}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deviceHelp && (
+          <div className="device-help-guide">
+            <div className="help-guide-header">
+              <h4>{deviceHelp.title}</h4>
+              <p>Follow these methods to get accurate sensor readings for your equipment:</p>
+            </div>
+            <div className="help-sections">
+              {deviceHelp.sections.map((section, idx) => (
+                <div key={idx} className="help-section">
+                  <div className="help-section-header">
+                    <span className="help-icon">{section.icon}</span>
+                    <h5>{section.title}</h5>
+                  </div>
+                  <div className="help-items">
+                    {section.items.map((item, itemIdx) => (
+                      <div key={itemIdx} className="help-item">
+                        <div className="help-item-label">{item.label}</div>
+                        <div className="help-item-value">{item.value}</div>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
-              )}
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button onClick={analyzeEquipment} disabled={analyzing} className="analyze-btn">
+          {analyzing ? (
+            <>
+              <span className="spinner"></span>
+              <span>Analyzing Equipment...</span>
             </>
           ) : (
-            <div className="empty-state">
-              <div className="empty-icon">🤖</div>
-              <h3>Ready for AI Analysis</h3>
-              <p>Configure your equipment and enter sensor readings to begin health analysis.</p>
-              <div className="empty-features">
-                <div className="feature-item">
-                  <span className="feature-icon">✓</span>
-                  <span>AI-Powered Diagnostics</span>
+            <>
+              <span className="btn-icon">🔍</span>
+              <span>Analyze Equipment Health</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="results-section">
+        {prediction ? (
+          <>
+            <h2 className="section-title">🤖 AI Health Analysis</h2>
+            <div className="health-score-card">
+              <div
+                className="score-circle"
+                style={{
+                  background: `conic-gradient(${getHealthColor(prediction.health_score)} ${prediction.health_score * 3.6
+                    }deg, #334155 0deg)`
+                }}
+              >
+                <div className="score-inner">
+                  <span className="score-value">{Math.round(prediction.health_score)}</span>
+                  <span className="score-label">Health Score</span>
                 </div>
-                <div className="feature-item">
-                  <span className="feature-icon">✓</span>
-                  <span>Predictive Maintenance</span>
+              </div>
+              <div className="risk-badge" style={{ backgroundColor: getRiskColor(prediction.risk_level) }}>
+                Risk Level: {prediction.risk_level?.toUpperCase?.() || 'N/A'}
+              </div>
+            </div>
+            <div className="metrics-grid">
+              <div className="metric-card">
+                <div className="metric-icon">📅</div>
+                <div className="metric-content">
+                  <div className="metric-value">{prediction.remaining_life_days}</div>
+                  <div className="metric-label">Days Remaining Life</div>
                 </div>
-                <div className="feature-item">
-                  <span className="feature-icon">✓</span>
-                  <span>Risk Assessment</span>
+              </div>
+              <div className="metric-card">
+                <div className="metric-icon">🔧</div>
+                <div className="metric-content">
+                  <div className="metric-value">{prediction.maintenance_needed_days}</div>
+                  <div className="metric-label">Days Until Maintenance</div>
                 </div>
               </div>
             </div>
-          )}
-        </div>
+            {Array.isArray(prediction.recommendations) && (
+              <div className="recommendations">
+                <h3>💡 AI Recommendations</h3>
+                <ul className="recommendation-list">
+                  {prediction.recommendations.map((rec, index) => (
+                    <li key={index} className="recommendation-item">
+                      <span className="rec-icon">•</span>
+                      <span>{rec}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="empty-state">
+            <div className="empty-icon">🤖</div>
+            <h3>Ready for AI Analysis</h3>
+            <p>Configure your equipment and enter sensor readings to begin health analysis.</p>
+            <div className="empty-features">
+              <div className="feature-item">
+                <span className="feature-icon">✓</span>
+                <span>AI-Powered Diagnostics</span>
+              </div>
+              <div className="feature-item">
+                <span className="feature-icon">✓</span>
+                <span>Predictive Maintenance</span>
+              </div>
+              <div className="feature-item">
+                <span className="feature-icon">✓</span>
+                <span>Risk Assessment</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

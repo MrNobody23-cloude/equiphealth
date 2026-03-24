@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import api from '../services/api';
+import api, { clearAuthToken } from '../services/api';
 
 const AuthContext = createContext();
 export const useAuth = () => {
@@ -69,10 +69,14 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    try { await api.post?.('/auth/logout').catch(() => {}); } catch {}
-    localStorage.removeItem('token');
-    setToken(null);
+    try {
+      await api.post('/auth/logout').catch(() => { });
+    } catch { }
+
+    clearAuthToken();
+
     setUser(null);
+    setToken(null);
     window.location.href = '/login';
   };
 
@@ -83,7 +87,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.get('/auth/me', null, { timeout: 10000 });
       if (res.data?.success) setUser(res.data.user);
-    } catch {}
+    } catch { }
   };
 
   const value = { token, user, setUser, initialized, register, login, logout, applyToken, setToken };
