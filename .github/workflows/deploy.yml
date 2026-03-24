@@ -25,12 +25,11 @@ jobs:
         run: npm run build
 
       - name: Deploy to Firebase
-        uses: w9jds/firebase-action@v2
+        uses: w9jds/firebase-action@master
         with:
-          # Tell firebase tool to use the config in Frontend folder
           args: deploy --only hosting
-          # OR just tell it where the project is if needed, but given the structure, 
-          # we might need to tell it to look at Frontend/firebase.json
         env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          PROJECT_ID: equiphealth-7cf34
           FIREBASE_PROJECT: equiphealth-7cf34
