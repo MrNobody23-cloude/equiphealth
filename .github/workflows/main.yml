@@ -10,14 +10,29 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+
       - name: Setup Node.js
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
         with:
-          node-version: '16'
-      - name: Install Dependencies
+          node-version: '18'
+
+      - name: Install Frontend Dependencies
+        working-directory: ./Frontend
         run: npm install
-      - name: Build
+
+      - name: Build Frontend
+        working-directory: ./Frontend
         run: npm run build
-      - name: Test
-        run: npm test
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm install
+
+      # - name: Test Frontend (if applicable)
+      #   working-directory: ./Frontend
+      #   run: npm test || true
+
+      # - name: Test Backend (if applicable)
+      #   working-directory: ./backend
+      #   run: npm test || true

@@ -11,10 +11,26 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install Frontend Dependencies
+        working-directory: ./Frontend
+        run: npm install
+
+      - name: Build Frontend
+        working-directory: ./Frontend
+        run: npm run build
+
       - name: Deploy to Firebase
         uses: w9jds/firebase-action@v2
         with:
+          # Tell firebase tool to use the config in Frontend folder
           args: deploy --only hosting
+          # OR just tell it where the project is if needed, but given the structure, 
+          # we might need to tell it to look at Frontend/firebase.json
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_PROJECT: equiphealth-7cf34
